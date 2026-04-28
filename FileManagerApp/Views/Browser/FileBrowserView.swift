@@ -6,6 +6,7 @@ import UniformTypeIdentifiers
 struct FileBrowserView: View {
     @ObservedObject var vm: FileBrowserViewModel
     @EnvironmentObject var appState: AppState
+    @EnvironmentObject var connVM: ConnectionViewModel
 
     @State private var selectedItem: FileItem?
     @State private var previewItem: FileItem?
@@ -15,11 +16,13 @@ struct FileBrowserView: View {
     @State private var newFolderName: String = ""
     @State private var showFilePicker: Bool = false
     @State private var showFolderPicker: Bool = false
+    @State private var showSystemBrowserPicker: Bool = false
     @State private var showSortMenu: Bool = false
     @State private var showDeleteConfirm: Bool = false
     @State private var itemToDelete: FileItem?
     @State private var shareURL: URL?
     @State private var showShareSheet: Bool = false
+    @State private var systemPreviewItem: FileItem?
 
     @Environment(\.dismiss) private var dismiss
 
@@ -64,6 +67,9 @@ struct FileBrowserView: View {
         .errorAlert(error: $vm.error)
         .sheet(item: $previewItem) { item in
             UniversalPreviewView(item: item, provider: vm)
+        }
+        .sheet(item: $systemPreviewItem) { item in
+            UniversalPreviewView(item: item, provider: connVM.makeLocalBrowser())
         }
         .alert("Rename", isPresented: .init(
             get: { renameItem != nil },
@@ -143,6 +149,19 @@ struct FileBrowserView: View {
                 } catch {
                     vm.error = "Could not save folder access."
                 }
+            case .failure(let err):
+                vm.error = err.localizedDescription
+            }
+        }
+        .fileImporter(
+            isPresented: $showSystemBrowserPicker,
+            allowedContentTypes: [.item, .folder],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case .success(let urls):
+                guard let picked = urls.first else { return }
+                handleSystemPickedURL(picked)
             case .failure(let err):
                 vm.error = err.localizedDescription
             }
@@ -535,6 +554,11 @@ struct FileBrowserView: View {
                         Label("Add Folder Access", systemImage: "folder.badge.gearshape")
                     }
                 }
+                Button {
+                    showSystemBrowserPicker = true
+                } label: {
+                    Label("Browse Files Providers", systemImage: "folder")
+                }
                 Divider()
                 Button {
                     vm.isSelecting = true
@@ -637,6 +661,56 @@ struct FileBrowserView: View {
     private func handleLongPress(_ item: FileItem) {
         vm.isSelecting = true
         vm.toggleSelection(item)
+    }
+
+    private func handleSystemPickedURL(_ picked: URL) {
+        let granted = picked.startAccessingSecurityScopedResource()
+        defer {
+            if granted {
+                picked.stopAccessingSecurityScopedResource()
+            }
+        }
+
+        let isDirectory = (try? picked.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? picked.hasDirectoryPath
+        if isDirectory {
+            do {
+                try LocalFileService.addExternalFolderBookmark(url: picked)
+                if vm.providerType == .local {
+                    Task { await vm.refresh() }
+                }
+            } catch {
+                vm.error = "Could not save folder access."
+            }
+            return
+        }
+
+        do {
+            let tempURL = try copyImportedFileToAppTemp(picked)
+            if let item = FileItem.fromLocalURL(tempURL, provider: .local) {
+                systemPreviewItem = item
+            } else {
+                vm.error = "Could not open selected file."
+            }
+        } catch {
+            vm.error = error.localizedDescription
+        }
+    }
+
+    private func copyImportedFileToAppTemp(_ source: URL) throws -> URL {
+        let fm = FileManager.default
+        let targetDir = fm.temporaryDirectory.appendingPathComponent("PickedFiles", isDirectory: true)
+        try fm.createDirectory(at: targetDir, withIntermediateDirectories: true, attributes: nil)
+
+        let safeName = source.lastPathComponent.isEmpty ? "OpenedFile" : source.lastPathComponent
+        let dst = targetDir.appendingPathComponent("\(UUID().uuidString)-\(safeName)")
+
+        do {
+            try fm.copyItem(at: source, to: dst)
+        } catch {
+            let data = try Data(contentsOf: source)
+            try data.write(to: dst, options: .atomic)
+        }
+        return dst
     }
 }
 

@@ -115,7 +115,7 @@ final class LocalFileService: FileProvider {
             throw FileProviderError.invalidPath(path)
         }
 
-        let roots = Self.rootPaths.map(\.path).filter { FileManager.default.fileExists(atPath: $0) }
+        let roots = Self.normalizedScanRoots(from: Self.rootPaths.map(\.path))
         var scanned = try await Task.detached(priority: .userInitiated) {
             try Self.scanFiles(in: roots, kind: folder.kind)
         }.value
@@ -123,11 +123,13 @@ final class LocalFileService: FileProvider {
         if folder.kind == .images || folder.kind == .videos {
             let photoItems = try await scanPhotoLibrary(kind: folder.kind)
             scanned.append(contentsOf: photoItems)
-            scanned.sort { $0.modifiedDate > $1.modifiedDate }
         }
 
-        smartFolderCache[path] = (Date(), scanned)
-        return scanned
+        let deduped = Self.deduplicated(scanned)
+            .sorted { $0.modifiedDate > $1.modifiedDate }
+
+        smartFolderCache[path] = (Date(), deduped)
+        return deduped
     }
 
     // MARK: - Info
@@ -548,6 +550,37 @@ final class LocalFileService: FileProvider {
         }
 
         return items
+    }
+
+    private static func normalizedScanRoots(from roots: [String]) -> [String] {
+        let fm = FileManager.default
+        var existing = roots.filter { fm.fileExists(atPath: $0) }
+        existing = Array(Set(existing)).sorted { $0.count < $1.count }
+
+        var filtered: [String] = []
+        for candidate in existing {
+            let isNested = filtered.contains { parent in
+                candidate == parent || candidate.hasPrefix(parent + "/")
+            }
+            if !isNested {
+                filtered.append(candidate)
+            }
+        }
+        return filtered
+    }
+
+    private static func deduplicated(_ items: [FileItem]) -> [FileItem] {
+        var seen = Set<String>()
+        var result: [FileItem] = []
+        result.reserveCapacity(items.count)
+
+        for item in items {
+            let key = item.isDirectory ? "D:\(item.path)" : "F:\(item.path)"
+            if seen.insert(key).inserted {
+                result.append(item)
+            }
+        }
+        return result
     }
 
     private static func matches(kind: SmartFolder.Kind, type: FileItemType) -> Bool {

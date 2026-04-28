@@ -1,5 +1,6 @@
 import SwiftUI
 import QuickLook
+import UniformTypeIdentifiers
 
 // MARK: - Universal Preview Router
 
@@ -11,6 +12,7 @@ struct UniversalPreviewView: View {
     @State private var isLoading: Bool = true
     @State private var loadError: String?
     @State private var textContent: String?
+    @State private var resolvedType: FileItemType?
     @State private var showShareSheet: Bool = false
     @State private var showOpenWith: Bool = false
     @Environment(\.dismiss) private var dismiss
@@ -65,7 +67,7 @@ struct UniversalPreviewView: View {
 
     @ViewBuilder
     private func previewContent(url: URL) -> some View {
-        switch item.itemType {
+        switch resolvedType ?? item.itemType {
         case .image:
             ImagePreviewView(url: url)
 
@@ -136,7 +138,8 @@ struct UniversalPreviewView: View {
                 throw FileProviderError.fileNotFound(item.path)
             }
             localURL = url
-            if item.itemType == .text || item.itemType == .code {
+            resolvedType = resolvePreferredType(using: url)
+            if (resolvedType == .text || resolvedType == .code || item.itemType == .text || item.itemType == .code) {
                 textContent = try decodeTextFile(at: url)
             }
         } catch {
@@ -176,6 +179,41 @@ struct UniversalPreviewView: View {
             return fallback
         }
         throw FileProviderError.transferFailed("Unsupported text encoding.")
+    }
+
+    private func resolvePreferredType(using localURL: URL) -> FileItemType {
+        if [.image, .video, .audio, .pdf, .text, .code].contains(item.itemType) {
+            return item.itemType
+        }
+
+        if let mime = item.mimeType?.lowercased() {
+            if mime.hasPrefix("image/") { return .image }
+            if mime.hasPrefix("video/") { return .video }
+            if mime.hasPrefix("audio/") { return .audio }
+            if mime == "application/pdf" { return .pdf }
+            if mime.hasPrefix("text/") { return .text }
+        }
+
+        let nameExt = URL(fileURLWithPath: item.name).pathExtension.lowercased()
+        if let byName = FileTypeHelper.typeFromExtension(nameExt) {
+            return byName
+        }
+
+        let localExt = localURL.pathExtension.lowercased()
+        if let byLocal = FileTypeHelper.typeFromExtension(localExt) {
+            return byLocal
+        }
+
+        if let type = UTType(filenameExtension: nameExt.isEmpty ? localExt : nameExt) {
+            if type.conforms(to: .image) { return .image }
+            if type.conforms(to: .movie) { return .video }
+            if type.conforms(to: .audio) { return .audio }
+            if type.conforms(to: .pdf) { return .pdf }
+            if type.conforms(to: .text) { return .text }
+            if type.conforms(to: .sourceCode) { return .code }
+        }
+
+        return item.itemType
     }
 }
 

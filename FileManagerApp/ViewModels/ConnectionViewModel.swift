@@ -230,7 +230,7 @@ private struct OAuthProviderConfig {
 
         switch type {
         case .googleDrive:
-            let clientID = Bundle.main.string(forInfoDictionaryKey: "GoogleOAuthClientID") ?? ""
+            let clientID = Bundle.main.object(forInfoDictionaryKey: "GoogleOAuthClientID") as? String ?? ""
             guard !clientID.isBlank else { throw OAuthError.invalidConfiguration("Set GoogleOAuthClientID in Info.plist.") }
             return OAuthProviderConfig(
                 clientID: clientID,
@@ -242,7 +242,7 @@ private struct OAuthProviderConfig {
                 extraAuthorizeQueryItems: [URLQueryItem(name: "access_type", value: "offline")]
             )
         case .dropbox:
-            let clientID = Bundle.main.string(forInfoDictionaryKey: "DropboxOAuthClientID") ?? ""
+            let clientID = Bundle.main.object(forInfoDictionaryKey: "DropboxOAuthClientID") as? String ?? ""
             guard !clientID.isBlank else { throw OAuthError.invalidConfiguration("Set DropboxOAuthClientID in Info.plist.") }
             return OAuthProviderConfig(
                 clientID: clientID,
@@ -256,7 +256,7 @@ private struct OAuthProviderConfig {
                 ]
             )
         case .oneDrive:
-            let clientID = Bundle.main.string(forInfoDictionaryKey: "OneDriveOAuthClientID") ?? ""
+            let clientID = Bundle.main.object(forInfoDictionaryKey: "OneDriveOAuthClientID") as? String ?? ""
             guard !clientID.isBlank else { throw OAuthError.invalidConfiguration("Set OneDriveOAuthClientID in Info.plist.") }
             return OAuthProviderConfig(
                 clientID: clientID,
