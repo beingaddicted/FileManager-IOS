@@ -55,6 +55,11 @@ struct ContentView: View {
         }
         .preferredColorScheme(appState.theme.colorScheme)
         .errorAlert(error: $appState.alertError)
+        .sheet(item: $appState.incomingPreviewItem) { item in
+            NavigationStack {
+                UniversalPreviewView(item: item, provider: connVM.makeLocalBrowser())
+            }
+        }
         .onAppear {
             if !didAppear {
                 didAppear = true

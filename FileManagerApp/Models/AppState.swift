@@ -61,13 +61,18 @@ final class AppState: ObservableObject {
     @Published var favorites: [FileItem] = [] {
         didSet { saveFavorites() }
     }
+    @Published var localPinnedLocations: [LocalPinnedLocation] = [] {
+        didSet { saveLocalPinnedLocations() }
+    }
 
     // Global error banner
     @Published var alertError: String?
+    @Published var incomingPreviewItem: FileItem?
 
     private let connectionsKey = "app_connections_v2"
     private let recentsKey     = "app_recents_v1"
     private let favoritesKey   = "app_favorites_v1"
+    private let pinnedLocalKey = "app_local_pinned_v1"
 
     init() {
         loadAll()
@@ -125,12 +130,31 @@ final class AppState: ObservableObject {
         favorites.contains { $0.id == item.id }
     }
 
+    // MARK: - Local pinned locations
+
+    func isPinnedLocalLocation(path: String) -> Bool {
+        localPinnedLocations.contains { $0.path == path }
+    }
+
+    func togglePinnedLocalLocation(_ item: FileItem) {
+        if isPinnedLocalLocation(path: item.path) {
+            localPinnedLocations.removeAll { $0.path == item.path }
+        } else {
+            localPinnedLocations.append(LocalPinnedLocation(name: item.name, path: item.path))
+        }
+    }
+
+    func movePinnedLocalLocations(from source: IndexSet, to destination: Int) {
+        localPinnedLocations.move(fromOffsets: source, toOffset: destination)
+    }
+
     // MARK: - Persistence
 
     private func loadAll() {
         connections = decode([ServerConnection].self, key: connectionsKey) ?? []
         recentFiles = decode([FileItem].self, key: recentsKey) ?? []
         favorites   = decode([FileItem].self, key: favoritesKey) ?? []
+        localPinnedLocations = decode([LocalPinnedLocation].self, key: pinnedLocalKey) ?? []
     }
 
     private func saveConnections() {
@@ -143,6 +167,10 @@ final class AppState: ObservableObject {
 
     private func saveFavorites() {
         encode(favorites, key: favoritesKey)
+    }
+
+    private func saveLocalPinnedLocations() {
+        encode(localPinnedLocations, key: pinnedLocalKey)
     }
 
     private func encode<T: Encodable>(_ value: T, key: String) {
@@ -161,6 +189,17 @@ final class AppState: ObservableObject {
     func showError(_ message: String) {
         alertError = message
     }
+
+    func presentIncomingFile(_ item: FileItem) {
+        selectedTab = .local
+        incomingPreviewItem = item
+    }
+}
+
+struct LocalPinnedLocation: Codable, Hashable, Identifiable {
+    var id: String { path }
+    let name: String
+    let path: String
 }
 
 // MARK: - App Tabs

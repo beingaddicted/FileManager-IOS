@@ -20,6 +20,11 @@ struct AllFilesApp: App {
             ContentView()
                 .environmentObject(appState)
                 .environmentObject(connVM)
+                .onOpenURL { url in
+                    Task { @MainActor in
+                        handleIncomingOpenURL(url)
+                    }
+                }
         }
     }
 
@@ -30,5 +35,36 @@ struct AllFilesApp: App {
             options: [.allowAirPlay, .allowBluetooth]
         )
         try? AVAudioSession.sharedInstance().setActive(true)
+    }
+
+    private func handleIncomingOpenURL(_ url: URL) {
+        let isSecured = url.startAccessingSecurityScopedResource()
+        defer {
+            if isSecured { url.stopAccessingSecurityScopedResource() }
+        }
+
+        let fm = FileManager.default
+        let inbox = fm.temporaryDirectory.appendingPathComponent("OpenedFiles", isDirectory: true)
+        do {
+            try fm.createDirectory(at: inbox, withIntermediateDirectories: true, attributes: nil)
+            let name = url.lastPathComponent.isEmpty ? UUID().uuidString : url.lastPathComponent
+            let destination = inbox.appendingPathComponent("\(UUID().uuidString)-\(name)")
+
+            do {
+                try fm.copyItem(at: url, to: destination)
+            } catch {
+                // Fallback copy for providers that block direct copy
+                let data = try Data(contentsOf: url)
+                try data.write(to: destination, options: .atomic)
+            }
+
+            if let item = FileItem.fromLocalURL(destination, provider: .local) {
+                appState.presentIncomingFile(item)
+            } else {
+                appState.showError("Opened file is not supported.")
+            }
+        } catch {
+            appState.showError("Failed to open shared file: \(error.localizedDescription)")
+        }
     }
 }

@@ -48,18 +48,19 @@ final class NetworkDiscovery: ObservableObject {
         let searchTargets = [
             "ssdp:all",
             "upnp:rootdevice",
-            "urn:schemas-upnp-org:device:MediaServer:1"
+            "urn:schemas-upnp-org:device:MediaServer:1",
+            "urn:schemas-upnp-org:service:ContentDirectory:1"
         ]
 
         for (index, target) in searchTargets.enumerated() {
             guard !Task.isCancelled else { break }
             let message = """
-            M-SEARCH * HTTP/1.1\r
-            HOST: \(ssdpAddress):\(ssdpPort)\r
-            MAN: "ssdp:discover"\r
-            MX: 3\r
-            ST: \(target)\r
-            \r
+            M-SEARCH * HTTP/1.1\r\n
+            HOST: \(ssdpAddress):\(ssdpPort)\r\n
+            MAN: "ssdp:discover"\r\n
+            MX: 3\r\n
+            ST: \(target)\r\n
+            \r\n
             """
 
             // Use one UDP connection per search target and keep receiving
@@ -122,7 +123,7 @@ final class NetworkDiscovery: ObservableObject {
 
     private func parseSSDPResponse(_ response: String) {
         var headers: [String: String] = [:]
-        let lines = response.components(separatedBy: "\r\n")
+        let lines = response.components(separatedBy: .newlines)
         for line in lines {
             guard let idx = line.firstIndex(of: ":") else { continue }
             let key = String(line[..<idx]).trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
@@ -285,7 +286,7 @@ final class UPnPService: FileProvider {
         <s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/">
             <s:Body>
                 <u:Browse xmlns:u="urn:schemas-upnp-org:service:ContentDirectory:1">
-                    <ObjectID>\(objectId)</ObjectID>
+                    <ObjectID>\(xmlEscape(objectId))</ObjectID>
                     <BrowseFlag>BrowseDirectChildren</BrowseFlag>
                     <Filter>*</Filter>
                     <StartingIndex>0</StartingIndex>
@@ -304,7 +305,10 @@ final class UPnPService: FileProvider {
         req.setValue("\"urn:schemas-upnp-org:service:ContentDirectory:1#Browse\"", forHTTPHeaderField: "SOAPAction")
         req.httpBody   = soapBody.data(using: .utf8)
 
-        let (data, _) = try await URLSession.shared.data(for: req)
+        let (data, response) = try await URLSession.shared.data(for: req)
+        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            throw FileProviderError.serverError(http.statusCode, "UPnP browse failed")
+        }
         return parseDidlResponse(data, parentPath: path)
     }
 
@@ -410,9 +414,20 @@ final class UPnPService: FileProvider {
 
     private func fetchDeviceDescription(at location: String) async -> UPnPDevice? {
         guard let url = URL(string: location) else { return nil }
-        guard let (data, _) = try? await URLSession.shared.data(from: url) else { return nil }
+        guard let (data, response) = try? await URLSession.shared.data(from: url),
+              let http = response as? HTTPURLResponse,
+              (200...299).contains(http.statusCode) else { return nil }
         let parser = UPnPDeviceParser(data: data, location: location)
         return parser.parse()
+    }
+
+    private func xmlEscape(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
+            .replacingOccurrences(of: "'", with: "&apos;")
     }
 
     // MARK: - DIDL-Lite parser
@@ -446,22 +461,36 @@ private final class DIDLParser: NSObject, XMLParserDelegate {
     }
 
     func parse() throws -> [FileItem] {
-        // Extract DIDL from SOAP envelope
-        guard let str      = String(data: data, encoding: .utf8),
-              let start    = str.range(of: "<Result>"),
-              let end      = str.range(of: "</Result>") else { return [] }
-
-        var didl = String(str[start.upperBound..<end.lowerBound])
-        didl     = didl.replacingOccurrences(of: "&lt;",  with: "<")
-            .replacingOccurrences(of: "&gt;",  with: ">")
-            .replacingOccurrences(of: "&amp;", with: "&")
-            .replacingOccurrences(of: "&quot;", with: "\"")
+        guard let str = String(data: data, encoding: .utf8),
+              let didl = extractDIDL(fromSOAP: str) else { return [] }
 
         guard let didlData = didl.data(using: .utf8) else { return [] }
         let parser         = XMLParser(data: didlData)
         parser.delegate    = self
         parser.parse()
         return items
+    }
+
+    private func extractDIDL(fromSOAP xml: String) -> String? {
+        let pattern = "<(?:\\w+:)?Result[^>]*>(.*?)</(?:\\w+:)?Result>"
+        guard let regex = try? NSRegularExpression(pattern: pattern, options: [.caseInsensitive, .dotMatchesLineSeparators]),
+              let match = regex.firstMatch(in: xml, options: [], range: NSRange(location: 0, length: xml.utf16.count)),
+              let range = Range(match.range(at: 1), in: xml) else {
+            return nil
+        }
+
+        var didl = String(xml[range]).trimmingCharacters(in: .whitespacesAndNewlines)
+        if didl.hasPrefix("<![CDATA["), didl.hasSuffix("]]>") {
+            didl = String(didl.dropFirst(9).dropLast(3))
+        } else {
+            didl = didl
+                .replacingOccurrences(of: "&lt;", with: "<")
+                .replacingOccurrences(of: "&gt;", with: ">")
+                .replacingOccurrences(of: "&amp;", with: "&")
+                .replacingOccurrences(of: "&quot;", with: "\"")
+                .replacingOccurrences(of: "&apos;", with: "'")
+        }
+        return didl
     }
 
     func parser(_ p: XMLParser, didStartElement element: String,

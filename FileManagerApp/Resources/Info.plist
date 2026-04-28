@@ -10,14 +10,57 @@
 	<array>
 		<dict>
 			<key>CFBundleTypeName</key>
-			<string>All Files</string>
+			<string>Media Files</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.image</string>
+				<string>public.movie</string>
+				<string>public.audio</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Documents</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Owner</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>com.adobe.pdf</string>
+				<string>public.plain-text</string>
+				<string>public.text</string>
+				<string>org.openxmlformats.wordprocessingml.document</string>
+				<string>com.microsoft.word.doc</string>
+				<string>org.openxmlformats.spreadsheetml.sheet</string>
+				<string>com.microsoft.excel.xls</string>
+				<string>org.openxmlformats.presentationml.presentation</string>
+				<string>com.microsoft.powerpoint.ppt</string>
+				<string>com.apple.iwork.pages.pages</string>
+				<string>com.apple.iwork.numbers.numbers</string>
+				<string>com.apple.iwork.keynote.key</string>
+				<string>public.comma-separated-values-text</string>
+				<string>public.json</string>
+				<string>public.xml</string>
+				<string>net.daringfireball.markdown</string>
+			</array>
+		</dict>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Generic Files</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
 			<key>LSHandlerRank</key>
 			<string>Alternate</string>
 			<key>LSItemContentTypes</key>
 			<array>
-				<string>public.item</string>
 				<string>public.data</string>
 				<string>public.content</string>
+				<string>public.item</string>
 			</array>
 		</dict>
 	</array>
@@ -48,6 +91,12 @@
 	</array>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>GoogleOAuthClientID</key>
+	<string></string>
+	<key>DropboxOAuthClientID</key>
+	<string></string>
+	<key>OneDriveOAuthClientID</key>
+	<string></string>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
 	<key>NSAppTransportSecurity</key>
@@ -100,6 +149,8 @@
 		<string>processing</string>
 	</array>
 	<key>UIFileSharingEnabled</key>
+	<true/>
+	<key>UISupportsDocumentBrowser</key>
 	<true/>
 	<key>UILaunchScreen</key>
 	<dict/>

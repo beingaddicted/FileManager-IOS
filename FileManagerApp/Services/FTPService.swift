@@ -9,12 +9,25 @@ final class FTPService: FileProvider {
     private let connection: ServerConnection
     private var password: String { KeychainHelper.shared.password(for: connection) }
     private var baseURL: URL
+    private let rootPath: String
+    private let session: URLSession
 
     init(connection: ServerConnection) {
         self.connection = connection
         let scheme = connection.usesSSL ? "ftps" : "ftp"
         self.baseURL = URL(string: "\(scheme)://\(connection.host):\(connection.port)")
             ?? URL(string: "ftp://localhost")!
+        let normalizedBase = connection.basePath.trimmingCharacters(in: .whitespacesAndNewlines)
+        if normalizedBase.isEmpty || normalizedBase == "/" {
+            self.rootPath = "/"
+        } else {
+            self.rootPath = normalizedBase.hasPrefix("/") ? normalizedBase : "/\(normalizedBase)"
+        }
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 30
+        config.timeoutIntervalForResource = 120
+        config.waitsForConnectivity = true
+        self.session = URLSession(configuration: config)
     }
 
     // MARK: - Connect / Disconnect
@@ -32,8 +45,9 @@ final class FTPService: FileProvider {
     // MARK: - List
 
     func listDirectory(at path: String) async throws -> [FileItem] {
-        let lines = try await performList(path: path)
-        return parseFTPListing(lines, basePath: path)
+        let resolved = resolvePath(path)
+        let lines = try await performList(path: resolved)
+        return parseFTPListing(lines, basePath: resolved)
     }
 
     // MARK: - Info
@@ -51,9 +65,9 @@ final class FTPService: FileProvider {
     // MARK: - Download
 
     func download(from path: String, progress: ProgressHandler?) async throws -> Data {
-        let url = ftpURL(for: path)
+        let url = ftpURL(for: resolvePath(path))
         let request = authorisedRequest(url: url)
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await session.data(for: request)
         try validateResponse(response)
         progress?(1.0)
         return data
@@ -62,11 +76,11 @@ final class FTPService: FileProvider {
     // MARK: - Upload
 
     func upload(_ data: Data, to path: String, progress: ProgressHandler?) async throws {
-        let url = ftpURL(for: path)
+        let url = ftpURL(for: resolvePath(path))
         var request = authorisedRequest(url: url)
         request.httpMethod = "PUT"
         request.httpBody   = data
-        let (_, response)  = try await URLSession.shared.data(for: request)
+        let (_, response)  = try await session.data(for: request)
         try validateResponse(response)
         progress?(1.0)
     }
@@ -74,23 +88,19 @@ final class FTPService: FileProvider {
     // MARK: - Mutating ops (via FTP commands over URLSession)
 
     func delete(at path: String) async throws {
-        try await sendCommand("DELE \(path)", path: path)
+        throw FileProviderError.unsupportedOperation
     }
 
     func createDirectory(at path: String) async throws {
-        try await sendCommand("MKD \(path)", path: path)
+        throw FileProviderError.unsupportedOperation
     }
 
     func rename(at path: String, to newName: String) async throws {
-        let parent  = (path as NSString).deletingLastPathComponent
-        let newPath = (parent as NSString).appendingPathComponent(newName)
-        try await sendCommand("RNFR \(path)", path: path)
-        try await sendCommand("RNTO \(newPath)", path: path)
+        throw FileProviderError.unsupportedOperation
     }
 
     func move(from src: String, to dst: String) async throws {
-        try await sendCommand("RNFR \(src)", path: src)
-        try await sendCommand("RNTO \(dst)", path: src)
+        throw FileProviderError.unsupportedOperation
     }
 
     // MARK: - Private helpers
@@ -98,6 +108,21 @@ final class FTPService: FileProvider {
     private func ftpURL(for path: String) -> URL {
         let clean = path.hasPrefix("/") ? String(path.dropFirst()) : path
         return baseURL.appendingPathComponent(clean)
+    }
+
+    private func resolvePath(_ path: String) -> String {
+        let input = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        if rootPath == "/" {
+            return input.hasPrefix("/") ? input : "/\(input)"
+        }
+        if input == "/" || input.isEmpty {
+            return rootPath
+        }
+        if input.hasPrefix(rootPath + "/") || input == rootPath {
+            return input
+        }
+        let clean = input.hasPrefix("/") ? String(input.dropFirst()) : input
+        return rootPath + "/" + clean
     }
 
     private func authorisedRequest(url: URL) -> URLRequest {
@@ -114,19 +139,9 @@ final class FTPService: FileProvider {
     private func performList(path: String) async throws -> String {
         let url  = ftpURL(for: path.hasSuffix("/") ? path : path + "/")
         let req  = authorisedRequest(url: url)
-        let (data, response) = try await URLSession.shared.data(for: req)
+        let (data, response) = try await session.data(for: req)
         try validateResponse(response)
         return String(data: data, encoding: .utf8) ?? ""
-    }
-
-    private func sendCommand(_ command: String, path: String) async throws {
-        // FTP commands via URL scheme are limited; for full command support NMSSH or Socket is needed.
-        // This implementation uses the RFC-1738 FTP URL scheme supported by CFNetwork.
-        let url = ftpURL(for: path)
-        var req = authorisedRequest(url: url)
-        req.httpMethod = command.hasPrefix("MKD") ? "MKD" : "DELE"
-        let (_, response) = try await URLSession.shared.data(for: req)
-        try validateResponse(response)
     }
 
     private func validateResponse(_ response: URLResponse) throws {

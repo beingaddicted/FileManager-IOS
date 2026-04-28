@@ -137,8 +137,7 @@ struct UniversalPreviewView: View {
             }
             localURL = url
             if item.itemType == .text || item.itemType == .code {
-                textContent = try? String(contentsOf: url, encoding: .utf8)
-                    ?? String(contentsOf: url, encoding: .isoLatin1)
+                textContent = try decodeTextFile(at: url)
             }
         } catch {
             loadError = error.localizedDescription
@@ -157,12 +156,27 @@ struct UniversalPreviewView: View {
             loadError = error.localizedDescription
         }
     }
-}
 
-// MARK: - Throw from expression
+    private func decodeTextFile(at url: URL) throws -> String {
+        let data = try Data(contentsOf: url)
 
-private func `throw`(_ error: Error) throws -> URL {
-    throw error
+        // Pattern inspired by mature text editors: try BOM-aware and common legacy encodings.
+        let candidates: [String.Encoding] = [
+            .utf8, .utf16, .utf16LittleEndian, .utf16BigEndian,
+            .utf32, .unicode, .windowsCP1252, .isoLatin1
+        ]
+
+        for encoding in candidates {
+            if let text = String(data: data, encoding: encoding) {
+                return text
+            }
+        }
+
+        if let fallback = String(data: data, encoding: .ascii) {
+            return fallback
+        }
+        throw FileProviderError.transferFailed("Unsupported text encoding.")
+    }
 }
 
 // MARK: - QuickLook fallback

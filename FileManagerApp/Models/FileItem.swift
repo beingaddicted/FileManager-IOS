@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import UIKit
 
 // MARK: - File Item Type
 
@@ -22,22 +23,46 @@ enum FileItemType: String, Codable, CaseIterable {
 
     var systemImage: String {
         switch self {
-        case .folder:       return "folder.fill"
-        case .image:        return "photo.fill"
-        case .video:        return "film.fill"
-        case .audio:        return "music.note"
-        case .pdf:          return "doc.richtext.fill"
-        case .text:         return "doc.text.fill"
-        case .code:         return "chevron.left.forwardslash.chevron.right"
-        case .archive:      return "archivebox.fill"
-        case .document:     return "doc.fill"
-        case .spreadsheet:  return "tablecells.fill"
-        case .presentation: return "rectangle.stack.fill"
-        case .font:         return "textformat"
-        case .database:     return "cylinder.split.1x2.fill"
-        case .executable:   return "hammer.fill"
-        case .unknown:      return "doc.fill"
+        case .folder:
+            return bestSymbol(["folder.fill", "folder"])
+        case .image:
+            return bestSymbol(["photo.fill", "photo"])
+        case .video:
+            return bestSymbol(["film.fill", "film"])
+        case .audio:
+            return bestSymbol(["music.note", "speaker.wave.2.fill"])
+        case .pdf:
+            return bestSymbol(["doc.richtext.fill", "doc.richtext", "doc.text.fill"])
+        case .text:
+            return bestSymbol(["doc.text.fill", "doc.text"])
+        case .code:
+            return bestSymbol(["chevron.left.forwardslash.chevron.right", "curlybraces", "doc.plaintext"])
+        case .archive:
+            return bestSymbol(["archivebox.fill", "archivebox"])
+        case .document:
+            return bestSymbol(["doc.fill", "doc"])
+        case .spreadsheet:
+            return bestSymbol(["tablecells.fill", "tablecells"])
+        case .presentation:
+            return bestSymbol(["rectangle.stack.fill", "rectangle.stack", "rectangle.on.rectangle"])
+        case .font:
+            return bestSymbol(["textformat", "character"])
+        case .database:
+            return bestSymbol(["cylinder.split.1x2.fill", "cylinder"])
+        case .executable:
+            return bestSymbol(["hammer.fill", "terminal.fill", "hammer"])
+        case .unknown:
+            return bestSymbol(["doc.fill", "doc"])
         }
+    }
+
+    private func bestSymbol(_ candidates: [String]) -> String {
+        for name in candidates {
+            if UIImage(systemName: name) != nil {
+                return name
+            }
+        }
+        return "doc"
     }
 
     var accentColor: Color {
@@ -165,11 +190,7 @@ struct FileItem: Identifiable, Hashable, Codable {
     }
 
     var isPreviewable: Bool {
-        guard !isDirectory else { return false }
-        switch itemType {
-        case .image, .video, .audio, .pdf, .text, .code: return true
-        default: return false
-        }
+        !isDirectory
     }
 
     var isTextEditable: Bool {

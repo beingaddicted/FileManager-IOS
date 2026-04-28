@@ -10,13 +10,24 @@ final class WebDAVService: FileProvider {
     private var password: String { KeychainHelper.shared.password(for: connection) }
     private var session: URLSession
     private var baseURL: URL
+    private let rootPath: String
 
     init(connection: ServerConnection) {
         self.connection = connection
         let scheme      = connection.usesSSL ? "https" : "http"
         let port        = connection.port
         self.baseURL    = URL(string: "\(scheme)://\(connection.host):\(port)") ?? URL(string: "http://localhost")!
-        self.session    = URLSession(configuration: .default)
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 30
+        config.timeoutIntervalForResource = 120
+        config.waitsForConnectivity = true
+        self.session = URLSession(configuration: config)
+        let normalizedBase = connection.basePath.trimmingCharacters(in: .whitespacesAndNewlines)
+        if normalizedBase.isEmpty || normalizedBase == "/" {
+            self.rootPath = "/"
+        } else {
+            self.rootPath = normalizedBase.hasPrefix("/") ? normalizedBase : "/\(normalizedBase)"
+        }
     }
 
     // MARK: - Connect
@@ -145,8 +156,25 @@ final class WebDAVService: FileProvider {
     }
 
     private func absoluteURL(for path: String) -> URL {
-        let clean = path.hasPrefix("/") ? path : "/\(path)"
-        return baseURL.appendingPathComponent(clean)
+        let resolvedPath = resolvePath(path)
+        var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
+        components?.path = resolvedPath
+        return components?.url ?? baseURL
+    }
+
+    private func resolvePath(_ path: String) -> String {
+        let input = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        if rootPath == "/" {
+            return input.hasPrefix("/") ? input : "/\(input)"
+        }
+        if input == "/" || input.isEmpty {
+            return rootPath
+        }
+        if input.hasPrefix(rootPath + "/") || input == rootPath {
+            return input
+        }
+        let clean = input.hasPrefix("/") ? String(input.dropFirst()) : input
+        return rootPath + "/" + clean
     }
 
     private func validate(_ response: URLResponse, path: String) throws {

@@ -14,6 +14,7 @@ struct FileBrowserView: View {
     @State private var showNewFolder: Bool = false
     @State private var newFolderName: String = ""
     @State private var showFilePicker: Bool = false
+    @State private var showFolderPicker: Bool = false
     @State private var showSortMenu: Bool = false
     @State private var showDeleteConfirm: Bool = false
     @State private var itemToDelete: FileItem?
@@ -124,6 +125,28 @@ struct FileBrowserView: View {
                 vm.error = err.localizedDescription
             }
         }
+        .fileImporter(
+            isPresented: $showFolderPicker,
+            allowedContentTypes: [.folder],
+            allowsMultipleSelection: false
+        ) { result in
+            switch result {
+            case .success(let urls):
+                guard let folderURL = urls.first else { return }
+                let ok = folderURL.startAccessingSecurityScopedResource()
+                defer {
+                    if ok { folderURL.stopAccessingSecurityScopedResource() }
+                }
+                do {
+                    try LocalFileService.addExternalFolderBookmark(url: folderURL)
+                    Task { await vm.refresh() }
+                } catch {
+                    vm.error = "Could not save folder access."
+                }
+            case .failure(let err):
+                vm.error = err.localizedDescription
+            }
+        }
     }
 
     // MARK: - Breadcrumb bar
@@ -162,13 +185,125 @@ struct FileBrowserView: View {
 
     private var contentView: some View {
         Group {
-            if appState.viewMode == .list {
+            if shouldShowLocalHome {
+                localHomeContent
+            } else if appState.viewMode == .list {
                 listContent
             } else {
                 gridContent
             }
         }
         .animation(.spring(duration: 0.3), value: vm.filteredItems.map(\.id))
+    }
+
+    private var shouldShowLocalHome: Bool {
+        vm.providerType == .local &&
+        vm.currentPath == "/" &&
+        vm.searchText.isEmpty &&
+        !vm.isSelecting
+    }
+
+    private var rootLocationItems: [FileItem] {
+        vm.filteredItems
+            .filter { !$0.path.hasPrefix(LocalFileService.smartRootPrefix) }
+            .filter { !appState.isPinnedLocalLocation(path: $0.path) }
+    }
+
+    private var rootQuickAccessItems: [FileItem] {
+        vm.filteredItems
+            .filter { $0.path.hasPrefix(LocalFileService.smartRootPrefix) }
+            .filter { !appState.isPinnedLocalLocation(path: $0.path) }
+    }
+
+    private var pinnedLocalItems: [FileItem] {
+        let byPath = Dictionary(uniqueKeysWithValues: vm.filteredItems.map { ($0.path, $0) })
+        return appState.localPinnedLocations.compactMap { pin in
+            if let item = byPath[pin.path] {
+                return item
+            }
+            return FileItem(
+                id: pin.path,
+                name: pin.name,
+                path: pin.path,
+                size: 0,
+                modifiedDate: Date(),
+                isDirectory: true,
+                isHidden: false,
+                isSymlink: false,
+                itemType: .folder,
+                providerType: .local
+            )
+        }
+    }
+
+    private var localHomeContent: some View {
+        List {
+            if !pinnedLocalItems.isEmpty {
+                Section("Pinned (\(pinnedLocalItems.count))") {
+                    ForEach(pinnedLocalItems) { item in
+                        locationShortcutRow(item)
+                    }
+                    .onMove { source, destination in
+                        appState.movePinnedLocalLocations(from: source, to: destination)
+                    }
+                }
+            }
+
+            if !rootLocationItems.isEmpty {
+                Section("Locations (\(rootLocationItems.count))") {
+                    ForEach(rootLocationItems) { item in
+                        locationShortcutRow(item)
+                    }
+                }
+            }
+
+            if !rootQuickAccessItems.isEmpty {
+                Section("Quick Access (\(rootQuickAccessItems.count))") {
+                    ForEach(rootQuickAccessItems) { item in
+                        locationShortcutRow(item)
+                    }
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+    }
+
+    private func locationShortcutRow(_ item: FileItem) -> some View {
+        HStack(spacing: 12) {
+            Button {
+                handleTap(item)
+            } label: {
+                HStack(spacing: 12) {
+                    Image(systemName: item.systemImage)
+                        .foregroundStyle(item.accentColor)
+                        .font(.title3)
+                        .frame(width: 24)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(item.name)
+                            .foregroundStyle(.primary)
+                        Text(item.path)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.right")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+                .padding(.vertical, 4)
+            }
+            .buttonStyle(.plain)
+
+            Button {
+                appState.togglePinnedLocalLocation(item)
+            } label: {
+                Image(systemName: appState.isPinnedLocalLocation(path: item.path) ? "pin.fill" : "pin")
+                    .foregroundStyle(appState.isPinnedLocalLocation(path: item.path) ? .orange : .secondary)
+            }
+            .buttonStyle(.borderless)
+        }
     }
 
     // MARK: - List
@@ -303,6 +438,8 @@ struct FileBrowserView: View {
                 } label: {
                     Label("Back", systemImage: "chevron.left")
                 }
+            } else if shouldShowLocalHome && pinnedLocalItems.count > 1 {
+                EditButton()
             }
         }
 
@@ -391,6 +528,13 @@ struct FileBrowserView: View {
                 } label: {
                     Label("Upload File", systemImage: "arrow.up.doc")
                 }
+                if vm.providerType == .local {
+                    Button {
+                        showFolderPicker = true
+                    } label: {
+                        Label("Add Folder Access", systemImage: "folder.badge.gearshape")
+                    }
+                }
                 Divider()
                 Button {
                     vm.isSelecting = true
@@ -414,12 +558,11 @@ struct FileBrowserView: View {
 
     @ViewBuilder
     private func contextMenu(for item: FileItem) -> some View {
-        if item.isPreviewable {
-            Button {
-                previewItem = item
-            } label: {
-                Label("Preview", systemImage: "eye")
-            }
+        Button {
+            appState.addRecent(item)
+            previewItem = item
+        } label: {
+            Label("Open", systemImage: "eye")
         }
 
         Button {
@@ -478,19 +621,17 @@ struct FileBrowserView: View {
     private func handleTap(_ item: FileItem) {
         if vm.isSelecting {
             vm.toggleSelection(item)
-        } else if item.isDirectory {
-            vm.open(item)
-        } else if item.isPreviewable && appState.previewOnTap {
-            appState.addRecent(item)
-            previewItem = item
-        } else {
-            Task {
-                if let url = await vm.download(item) {
-                    shareURL = url
-                    showShareSheet = true
-                }
-            }
+            return
         }
+
+        if item.isDirectory {
+            vm.open(item)
+            return
+        }
+
+        // Open every file type in-app (native viewer/editor/QuickLook fallback).
+        appState.addRecent(item)
+        previewItem = item
     }
 
     private func handleLongPress(_ item: FileItem) {

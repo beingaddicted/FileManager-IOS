@@ -5,6 +5,7 @@ import SwiftUI
 struct AddConnectionView: View {
     @Environment(\.dismiss) private var dismiss
     @EnvironmentObject var appState: AppState
+    @EnvironmentObject var connVM: ConnectionViewModel
 
     var existing: ServerConnection?
 
@@ -19,8 +20,11 @@ struct AddConnectionView: View {
     @State private var anonymousLogin: Bool = false
     @State private var showPassword: Bool = false
     @State private var validationError: String?
+    @State private var didAutoLaunchSSO = false
+    @State private var isAuthenticatingCloud = false
 
     private var isEditing: Bool { existing != nil }
+    private var isCloudType: Bool { [ConnectionType.googleDrive, .dropbox, .oneDrive].contains(connectionType) }
 
     init(existing: ServerConnection? = nil, preferredType: ConnectionType? = nil) {
         self.existing = existing
@@ -48,6 +52,13 @@ struct AddConnectionView: View {
                             portText = "\(defaultPort)"
                         }
                         usesSSL = new.usesSSL
+                        if [ConnectionType.googleDrive, .dropbox, .oneDrive].contains(new), !isEditing {
+                            if displayName.isBlank {
+                                displayName = new.rawValue
+                            }
+                            didAutoLaunchSSO = false
+                            launchCloudSSOIfNeeded(for: new)
+                        }
                     }
                 } header: {
                     Text("Connection Type")
@@ -57,11 +68,11 @@ struct AddConnectionView: View {
                 Section {
                     TextField("My Server", text: $displayName)
                 } header: {
-                    Text("Display Name")
+                    Text(isCloudType ? "Account Name" : "Display Name")
                 }
 
                 // MARK: - Server details
-                if connectionType.requiresPath || connectionType == .upnp {
+                if !isCloudType && (connectionType.requiresPath || connectionType == .upnp) {
                     Section {
                         if connectionType != .upnp {
                             HStack {
@@ -128,7 +139,34 @@ struct AddConnectionView: View {
                 }
 
                 // MARK: - Auth
-                if connectionType.usesAuth && connectionType != .upnp {
+                if isCloudType {
+                    Section {
+                        Button {
+                            startCloudSSO(for: connectionType, autoSave: false)
+                        } label: {
+                            HStack {
+                                Image(systemName: connectionType.systemImage)
+                                    .foregroundStyle(connectionType.tintColor)
+                                Text(isAuthenticatingCloud ? "Signing in…" : "Continue with \(connectionType.rawValue)")
+                                Spacer()
+                                if isAuthenticatingCloud {
+                                    ProgressView()
+                                } else {
+                                    Image(systemName: "arrow.up.right.square")
+                                        .foregroundStyle(.secondary)
+                                }
+                            }
+                        }
+                        .disabled(isAuthenticatingCloud)
+                        SecureField("Access Token (optional)", text: $password)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                    } header: {
+                        Text("Sign In")
+                    } footer: {
+                        Text("SSO opens in browser. If your provider returns an API token, paste it here.")
+                    }
+                } else if connectionType.usesAuth && connectionType != .upnp {
                     Section {
                         if connectionType == .ftp {
                             Toggle("Anonymous Login", isOn: $anonymousLogin)
@@ -170,26 +208,6 @@ struct AddConnectionView: View {
                         Text("Authentication")
                     }
 
-                    if [ConnectionType.googleDrive, .dropbox, .oneDrive].contains(connectionType) {
-                        Section {
-                            Button {
-                                openOAuthFlow(for: connectionType)
-                            } label: {
-                                HStack {
-                                    Image(systemName: connectionType.systemImage)
-                                        .foregroundStyle(connectionType.tintColor)
-                                    Text("Sign in with \(connectionType.rawValue)")
-                                    Spacer()
-                                    Image(systemName: "arrow.up.right.square")
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                        } header: {
-                            Text("OAuth Sign-In")
-                        } footer: {
-                            Text("Sign-in opens a browser for secure OAuth 2.0 authorisation.")
-                        }
-                    }
                 }
 
                 // MARK: - Validation error
@@ -222,6 +240,10 @@ struct AddConnectionView: View {
         guard let c = existing else {
             let defaultPort = connectionType == .upnp ? 80 : connectionType.defaultPort
             portText = "\(defaultPort)"
+            if isCloudType {
+                if displayName.isBlank { displayName = connectionType.rawValue }
+                launchCloudSSOIfNeeded(for: connectionType)
+            }
             return
         }
         displayName    = c.displayName
@@ -240,7 +262,14 @@ struct AddConnectionView: View {
         validationError = nil
 
         // Validate
-        if displayName.isBlank { validationError = "Display name is required."; return }
+        if displayName.isBlank {
+            displayName = connectionType.rawValue
+        }
+        if isCloudType && password.isBlank &&
+            (KeychainHelper.shared.token(for: connectionType.providerType) ?? "").isEmpty {
+            validationError = "Sign in with \(connectionType.rawValue) first."
+            return
+        }
         if connectionType != .upnp && !connectionType.isCloud && host.isBlank {
             validationError = "Host is required."; return
         }
@@ -264,7 +293,13 @@ struct AddConnectionView: View {
         conn.usesSSL        = usesSSL
         conn.anonymousLogin = anonymousLogin
 
-        KeychainHelper.shared.savePassword(password, for: conn)
+        if isCloudType {
+            if !password.isBlank {
+                KeychainHelper.shared.saveToken(password, provider: connectionType.providerType)
+            }
+        } else {
+            KeychainHelper.shared.savePassword(password, for: conn)
+        }
 
         if isEditing {
             appState.updateConnection(conn)
@@ -276,10 +311,28 @@ struct AddConnectionView: View {
 
     // MARK: - OAuth
 
-    private func openOAuthFlow(for type: ConnectionType) {
-        // Real implementation would open ASWebAuthenticationSession
-        // For now we just show a placeholder
-        validationError = "OAuth: open browser to \(type.rawValue) sign-in and paste the token."
+    private func launchCloudSSOIfNeeded(for type: ConnectionType) {
+        guard !didAutoLaunchSSO else { return }
+        didAutoLaunchSSO = true
+        startCloudSSO(for: type, autoSave: !isEditing)
+    }
+
+    private func startCloudSSO(for type: ConnectionType, autoSave: Bool) {
+        guard !isAuthenticatingCloud else { return }
+        isAuthenticatingCloud = true
+        validationError = nil
+
+        Task {
+            defer { isAuthenticatingCloud = false }
+            if let token = await connVM.authenticateCloud(type) {
+                password = token
+                if autoSave {
+                    save()
+                }
+            } else {
+                validationError = connVM.error ?? "Sign in failed."
+            }
+        }
     }
 }
 

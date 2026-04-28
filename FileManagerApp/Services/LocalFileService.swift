@@ -159,7 +159,7 @@ final class LocalFileService: FileProvider {
 
         return try withSecurityScopedAccess(for: path) {
             let url = URL(fileURLWithPath: path)
-            let data = try Data(contentsOf: url)
+            let data = try coordinatedReadData(at: url)
             progress?(1.0)
             return data
         }
@@ -179,7 +179,7 @@ final class LocalFileService: FileProvider {
     func upload(_ data: Data, to path: String, progress: ProgressHandler?) async throws {
         try withSecurityScopedAccess(for: path) {
             let url = URL(fileURLWithPath: path)
-            try data.write(to: url, options: .atomic)
+            try coordinatedWriteData(data, to: url)
             progress?(1.0)
         }
     }
@@ -467,6 +467,50 @@ final class LocalFileService: FileProvider {
             }
         }
         return try work()
+    }
+
+    private func coordinatedReadData(at url: URL) throws -> Data {
+        let coordinator = NSFileCoordinator(filePresenter: nil)
+        var coordinationError: NSError?
+        var readError: Error?
+        var result = Data()
+
+        coordinator.coordinate(readingItemAt: url, options: [], error: &coordinationError) { coordinatedURL in
+            do {
+                result = try Data(contentsOf: coordinatedURL)
+            } catch {
+                readError = error
+            }
+        }
+
+        if let coordinationError {
+            throw coordinationError
+        }
+        if let readError {
+            throw readError
+        }
+        return result
+    }
+
+    private func coordinatedWriteData(_ data: Data, to url: URL) throws {
+        let coordinator = NSFileCoordinator(filePresenter: nil)
+        var coordinationError: NSError?
+        var writeError: Error?
+
+        coordinator.coordinate(writingItemAt: url, options: [.forReplacing], error: &coordinationError) { coordinatedURL in
+            do {
+                try data.write(to: coordinatedURL, options: .atomic)
+            } catch {
+                writeError = error
+            }
+        }
+
+        if let coordinationError {
+            throw coordinationError
+        }
+        if let writeError {
+            throw writeError
+        }
     }
 
     private static func scanFiles(in roots: [String], kind: SmartFolder.Kind) throws -> [FileItem] {
