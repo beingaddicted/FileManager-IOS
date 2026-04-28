@@ -121,7 +121,8 @@ final class FileBrowserViewModel: ObservableObject {
     // MARK: - File operations
 
     func createFolder(named name: String) async {
-        if providerType == .local && currentPath == "/" {
+        if providerType == .local &&
+            (currentPath == "/" || currentPath.hasPrefix(LocalFileService.smartRootPrefix)) {
             self.error = "Open a location (Documents/Downloads/etc.) before creating a folder."
             return
         }
@@ -194,7 +195,8 @@ final class FileBrowserViewModel: ObservableObject {
     // MARK: - Upload
 
     func upload(url: URL) async {
-        if providerType == .local && currentPath == "/" {
+        if providerType == .local &&
+            (currentPath == "/" || currentPath.hasPrefix(LocalFileService.smartRootPrefix)) {
             error = "Open a location before uploading files."
             return
         }

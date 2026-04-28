@@ -5,6 +5,28 @@ import Foundation
 final class LocalFileService: FileProvider {
     let providerType: ProviderType = .local
     private(set) var isConnected: Bool = true
+    static let smartRootPrefix = "/__smart__"
+
+    private struct SmartFolder {
+        let name: String
+        let path: String
+        let kind: Kind
+
+        enum Kind {
+            case images
+            case videos
+            case documents
+        }
+    }
+
+    private static let smartFolders: [SmartFolder] = [
+        SmartFolder(name: "All Images", path: "\(smartRootPrefix)/images", kind: .images),
+        SmartFolder(name: "All Videos", path: "\(smartRootPrefix)/videos", kind: .videos),
+        SmartFolder(name: "All Documents", path: "\(smartRootPrefix)/documents", kind: .documents)
+    ]
+
+    private var smartFolderCache: [String: (timestamp: Date, items: [FileItem])] = [:]
+    private let cacheTTL: TimeInterval = 30
 
     func connect() async throws {}
     func disconnect() {}
@@ -13,7 +35,7 @@ final class LocalFileService: FileProvider {
 
     func listDirectory(at path: String) async throws -> [FileItem] {
         if path == "/" {
-            return Self.rootPaths.map { root in
+            let roots = Self.rootPaths.map { root in
                 FileItem(
                     id: root.path,
                     name: root.name,
@@ -27,6 +49,25 @@ final class LocalFileService: FileProvider {
                     providerType: .local
                 )
             }
+            let smart = Self.smartFolders.map { folder in
+                FileItem(
+                    id: folder.path,
+                    name: folder.name,
+                    path: folder.path,
+                    size: 0,
+                    modifiedDate: Date(),
+                    isDirectory: true,
+                    isHidden: false,
+                    isSymlink: false,
+                    itemType: .folder,
+                    providerType: .local
+                )
+            }
+            return roots + smart
+        }
+
+        if path.hasPrefix(Self.smartRootPrefix) {
+            return try await listSmartFolder(at: path)
         }
 
         let fm  = FileManager.default
@@ -52,6 +93,24 @@ final class LocalFileService: FileProvider {
             }
             throw error
         }
+    }
+
+    private func listSmartFolder(at path: String) async throws -> [FileItem] {
+        if let cached = smartFolderCache[path], Date().timeIntervalSince(cached.timestamp) < cacheTTL {
+            return cached.items
+        }
+
+        guard let folder = Self.smartFolders.first(where: { $0.path == path }) else {
+            throw FileProviderError.invalidPath(path)
+        }
+
+        let roots = Self.rootPaths.map(\.path).filter { FileManager.default.fileExists(atPath: $0) }
+        let scanned = try await Task.detached(priority: .userInitiated) {
+            try Self.scanFiles(in: roots, kind: folder.kind)
+        }.value
+
+        smartFolderCache[path] = (Date(), scanned)
+        return scanned
     }
 
     // MARK: - Info
@@ -118,9 +177,19 @@ final class LocalFileService: FileProvider {
         let fm  = FileManager.default
         var paths: [(String, String)] = []
 
+        // App container root
+        let home = NSHomeDirectory()
+        if fm.fileExists(atPath: home) {
+            paths.append(("App Container", home))
+        }
+
         // Documents
         if let docs = fm.urls(for: .documentDirectory, in: .userDomainMask).first {
             paths.append(("Documents", docs.path))
+            let inbox = docs.appendingPathComponent("Inbox")
+            if fm.fileExists(atPath: inbox.path) {
+                paths.append(("Inbox", inbox.path))
+            }
         }
         // Downloads (iOS 16+)
         if let dl = fm.urls(for: .downloadsDirectory, in: .userDomainMask).first,
@@ -145,6 +214,59 @@ final class LocalFileService: FileProvider {
             paths.append(("iCloud Documents", icloud.path))
         }
         return paths
+    }
+
+    private static func scanFiles(in roots: [String], kind: SmartFolder.Kind) throws -> [FileItem] {
+        let fm = FileManager.default
+        let keys: [URLResourceKey] = [
+            .isDirectoryKey, .isRegularFileKey, .isHiddenKey,
+            .contentModificationDateKey, .creationDateKey, .fileSizeKey, .isSymbolicLinkKey
+        ]
+
+        var items: [FileItem] = []
+
+        for rootPath in roots {
+            let rootURL = URL(fileURLWithPath: rootPath, isDirectory: true)
+            guard let enumerator = fm.enumerator(
+                at: rootURL,
+                includingPropertiesForKeys: keys,
+                options: [.skipsPackageDescendants, .skipsHiddenFiles]
+            ) else {
+                continue
+            }
+
+            for case let url as URL in enumerator {
+                guard let values = try? url.resourceValues(forKeys: Set(keys)),
+                      values.isDirectory != true,
+                      values.isRegularFile == true else {
+                    continue
+                }
+
+                let type = FileTypeHelper.detectType(for: url)
+                guard matches(kind: kind, type: type) else { continue }
+                if let item = FileItem.fromLocalURL(url, provider: .local) {
+                    items.append(item)
+                }
+            }
+        }
+
+        return items
+    }
+
+    private static func matches(kind: SmartFolder.Kind, type: FileItemType) -> Bool {
+        switch kind {
+        case .images:
+            return type == .image
+        case .videos:
+            return type == .video
+        case .documents:
+            switch type {
+            case .document, .spreadsheet, .presentation, .pdf, .text, .code, .archive, .database:
+                return true
+            default:
+                return false
+            }
+        }
     }
 }
 

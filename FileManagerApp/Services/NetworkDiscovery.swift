@@ -9,7 +9,6 @@ final class NetworkDiscovery: ObservableObject {
     @Published var discoveredDevices: [UPnPDevice] = []
     @Published var isDiscovering: Bool = false
 
-    private var listener: NWListener?
     private var connections: [NWConnection] = []
     private var discoveryTask: Task<Void, Never>?
     private var knownLocations = Set<String>()
@@ -33,8 +32,6 @@ final class NetworkDiscovery: ObservableObject {
     func stopDiscovery() {
         discoveryTask?.cancel()
         discoveryTask   = nil
-        listener?.cancel()
-        listener        = nil
         connections.forEach { $0.cancel() }
         connections     = []
         isDiscovering   = false
@@ -43,6 +40,8 @@ final class NetworkDiscovery: ObservableObject {
     // MARK: - SSDP M-SEARCH
 
     private func sendSSDPSearch() async {
+        defer { isDiscovering = false }
+
         let ssdpAddress  = "239.255.255.250"
         let ssdpPort: UInt16 = 1900
 
@@ -52,7 +51,7 @@ final class NetworkDiscovery: ObservableObject {
             "urn:schemas-upnp-org:device:MediaServer:1"
         ]
 
-        for target in searchTargets {
+        for (index, target) in searchTargets.enumerated() {
             guard !Task.isCancelled else { break }
             let message = """
             M-SEARCH * HTTP/1.1\r
@@ -61,56 +60,60 @@ final class NetworkDiscovery: ObservableObject {
             MX: 3\r
             ST: \(target)\r
             \r
-
             """
-            await sendUDP(message: message, host: ssdpAddress, port: ssdpPort)
-            try? await Task.sleep(nanoseconds: 500_000_000)
-        }
 
-        // Listen for responses for 6 seconds
-        await listenForSSDPResponses(duration: 6)
+            // Use one UDP connection per search target and keep receiving
+            // responses on that socket briefly after sending M-SEARCH.
+            await sendUDPAndCollectResponses(
+                message: message,
+                host: ssdpAddress,
+                port: ssdpPort,
+                receiveDuration: index == searchTargets.count - 1 ? 5.0 : 2.5
+            )
+        }
     }
 
-    private func sendUDP(message: String, host: String, port: UInt16) async {
+    private func sendUDPAndCollectResponses(
+        message: String,
+        host: String,
+        port: UInt16,
+        receiveDuration: TimeInterval
+    ) async {
         let conn = NWConnection(
             host: NWEndpoint.Host(host),
             port: NWEndpoint.Port(rawValue: port)!,
             using: .udp
         )
         connections.append(conn)
-        conn.start(queue: .global())
+        conn.start(queue: DispatchQueue(label: "ssdp.discovery.\(UUID().uuidString)"))
+
+        let deadline = Date().addingTimeInterval(receiveDuration)
+        receiveResponses(on: conn, until: deadline)
 
         let data = message.data(using: .utf8) ?? Data()
         conn.send(content: data, completion: .idempotent)
-
-        try? await Task.sleep(nanoseconds: 100_000_000)
+        try? await Task.sleep(nanoseconds: UInt64(receiveDuration * 1_000_000_000))
+        conn.cancel()
     }
 
-    private func listenForSSDPResponses(duration: TimeInterval) async {
-        let params = NWParameters.udp
-        params.allowLocalEndpointReuse = true
+    private func receiveResponses(on connection: NWConnection, until deadline: Date) {
+        connection.receiveMessage { [weak self] data, _, _, error in
+            guard let self else { return }
 
-        guard let listener = try? NWListener(using: params, on: 1900) else { return }
-        self.listener = listener
-
-        listener.newConnectionHandler = { [weak self] conn in
-            Task { @MainActor in
-                self?.handleIncoming(connection: conn)
-            }
-        }
-        listener.start(queue: .global())
-
-        try? await Task.sleep(nanoseconds: UInt64(duration * 1_000_000_000))
-        listener.cancel()
-    }
-
-    private func handleIncoming(connection: NWConnection) {
-        connection.start(queue: .global())
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 4096) { [weak self] data, _, _, _ in
             guard let data = data,
-                  let str  = String(data: data, encoding: .utf8) else { return }
+                  let str = String(data: data, encoding: .utf8) else {
+                if error == nil, Date() < deadline {
+                    self.receiveResponses(on: connection, until: deadline)
+                }
+                return
+            }
+
             Task { @MainActor in
-                self?.parseSSDPResponse(str)
+                self.parseSSDPResponse(str)
+            }
+
+            if error == nil, Date() < deadline {
+                self.receiveResponses(on: connection, until: deadline)
             }
         }
     }
@@ -121,13 +124,16 @@ final class NetworkDiscovery: ObservableObject {
         var headers: [String: String] = [:]
         let lines = response.components(separatedBy: "\r\n")
         for line in lines {
-            let parts = line.components(separatedBy: ": ")
-            if parts.count >= 2 {
-                headers[parts[0].uppercased()] = parts.dropFirst().joined(separator: ": ")
+            guard let idx = line.firstIndex(of: ":") else { continue }
+            let key = String(line[..<idx]).trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            let valueStart = line.index(after: idx)
+            let value = String(line[valueStart...]).trimmingCharacters(in: .whitespacesAndNewlines)
+            if !key.isEmpty && !value.isEmpty {
+                headers[key] = value
             }
         }
 
-        guard let location = headers["LOCATION"] ?? headers["location"],
+        guard let location = headers["LOCATION"],
               !knownLocations.contains(location) else { return }
 
         knownLocations.insert(location)

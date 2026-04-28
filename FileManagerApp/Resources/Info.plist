@@ -6,110 +6,6 @@
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
 	<string>AllFiles</string>
-	<key>CFBundleExecutable</key>
-	<string>$(EXECUTABLE_NAME)</string>
-	<key>CFBundleIdentifier</key>
-	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
-	<key>CFBundleInfoDictionaryVersion</key>
-	<string>6.0</string>
-	<key>CFBundleName</key>
-	<string>$(PRODUCT_NAME)</string>
-	<key>CFBundlePackageType</key>
-	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
-	<key>CFBundleShortVersionString</key>
-	<string>1.0</string>
-	<key>CFBundleVersion</key>
-	<string>1</string>
-
-	<!-- Supported orientations -->
-	<key>UISupportedInterfaceOrientations</key>
-	<array>
-		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
-		<string>UIInterfaceOrientationPortraitUpsideDown</string>
-	</array>
-	<key>UISupportedInterfaceOrientations~ipad</key>
-	<array>
-		<string>UIInterfaceOrientationPortrait</string>
-		<string>UIInterfaceOrientationLandscapeLeft</string>
-		<string>UIInterfaceOrientationLandscapeRight</string>
-		<string>UIInterfaceOrientationPortraitUpsideDown</string>
-	</array>
-
-	<!-- Privacy descriptions -->
-	<key>NSPhotoLibraryUsageDescription</key>
-	<string>AllFiles needs access to your photo library to import images and videos.</string>
-	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>AllFiles needs access to save media to your photo library.</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>AllFiles needs microphone access for audio recording.</string>
-	<key>NSCameraUsageDescription</key>
-	<string>AllFiles needs camera access for scanning documents.</string>
-	<key>NSLocalNetworkUsageDescription</key>
-	<string>AllFiles needs local network access to discover and connect to UPnP/DLNA, SMB, FTP, and WebDAV servers on your network.</string>
-	<key>NSFaceIDUsageDescription</key>
-	<string>AllFiles uses Face ID to protect your saved passwords.</string>
-
-	<!-- Bonjour / mDNS services for UPnP/DLNA discovery -->
-	<key>NSBonjourServices</key>
-	<array>
-		<string>_http._tcp</string>
-		<string>_ftp._tcp</string>
-		<string>_smb._tcp</string>
-		<string>_webdav._tcp</string>
-		<string>_webdavs._tcp</string>
-		<string>_afpovertcp._tcp</string>
-		<string>_daap._tcp</string>
-		<string>_ssh._tcp</string>
-	</array>
-
-	<!-- iCloud capabilities -->
-	<key>NSUbiquitousContainers</key>
-	<dict>
-		<key>iCloud.$(PRODUCT_BUNDLE_IDENTIFIER)</key>
-		<dict>
-			<key>NSUbiquitousContainerIsDocumentScopePublic</key>
-			<true/>
-			<key>NSUbiquitousContainerName</key>
-			<string>AllFiles</string>
-			<key>NSUbiquitousContainerSupportedFolderLevels</key>
-			<string>Any</string>
-		</dict>
-	</dict>
-
-	<!-- Background modes: audio playback + background fetch -->
-	<key>UIBackgroundModes</key>
-	<array>
-		<string>audio</string>
-		<string>fetch</string>
-	</array>
-
-	<!-- App Transport Security -->
-	<key>NSAppTransportSecurity</key>
-	<dict>
-		<key>NSAllowsArbitraryLoads</key>
-		<true/>
-		<key>NSAllowsLocalNetworking</key>
-		<true/>
-	</dict>
-
-	<!-- URL schemes for OAuth callbacks -->
-	<key>CFBundleURLTypes</key>
-	<array>
-		<dict>
-			<key>CFBundleTypeRole</key>
-			<string>Editor</string>
-			<key>CFBundleURLName</key>
-			<string>com.allfiles.oauth</string>
-			<key>CFBundleURLSchemes</key>
-			<array>
-				<string>allfiles</string>
-			</array>
-		</dict>
-	</array>
-
-	<!-- Supported document types -->
 	<key>CFBundleDocumentTypes</key>
 	<array>
 		<dict>
@@ -125,14 +21,101 @@
 			</array>
 		</dict>
 	</array>
-
-	<!-- File sharing enabled -->
-	<key>UIFileSharingEnabled</key>
-	<true/>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
+	<key>CFBundleShortVersionString</key>
+	<string>1.0</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>com.allfiles.oauth</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>allfiles</string>
+			</array>
+		</dict>
+	</array>
+	<key>CFBundleVersion</key>
+	<string>1</string>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
-
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+	</dict>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_http._tcp</string>
+		<string>_ftp._tcp</string>
+		<string>_smb._tcp</string>
+		<string>_webdav._tcp</string>
+		<string>_webdavs._tcp</string>
+		<string>_afpovertcp._tcp</string>
+		<string>_daap._tcp</string>
+		<string>_ssh._tcp</string>
+	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>AllFiles needs camera access for scanning documents.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>AllFiles uses Face ID to protect your saved passwords.</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>AllFiles needs local network access to discover and connect to UPnP/DLNA, SMB, FTP, and WebDAV servers on your network.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>AllFiles needs microphone access for audio recording.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>AllFiles needs access to save media to your photo library.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>AllFiles needs access to your photo library to import images and videos.</string>
+	<key>NSUbiquitousContainers</key>
+	<dict>
+		<key>iCloud.$(PRODUCT_BUNDLE_IDENTIFIER)</key>
+		<dict>
+			<key>NSUbiquitousContainerIsDocumentScopePublic</key>
+			<true/>
+			<key>NSUbiquitousContainerName</key>
+			<string>AllFiles</string>
+			<key>NSUbiquitousContainerSupportedFolderLevels</key>
+			<string>Any</string>
+		</dict>
+	</dict>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>audio</string>
+		<string>fetch</string>
+		<string>external-accessory</string>
+		<string>processing</string>
+	</array>
+	<key>UIFileSharingEnabled</key>
+	<true/>
 	<key>UILaunchScreen</key>
 	<dict/>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+	</array>
 </dict>
 </plist>
