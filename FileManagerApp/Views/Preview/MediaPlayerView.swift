@@ -246,9 +246,15 @@ final class MediaPlayerViewModel: ObservableObject {
     private var timeObserver: Any?
 
     init(url: URL, headers: [String: String]) {
-        // Pass auth headers (Basic, Bearer, etc.) directly to the AVURLAsset
-        // so the player can stream from protected sources without downloading
-        // the whole file first. Only used for HTTP/S sources.
+        // Forward auth headers (Basic, Bearer, etc.) to AVURLAsset so the
+        // player can stream from a protected NAS share without downloading
+        // the whole file first.
+        //
+        // The "AVURLAssetHTTPHeaderFieldsKey" string key is undocumented but
+        // has been honoured by AVFoundation since iOS 4 and remains supported
+        // through iOS 18; it's used by VLC, Infuse, Plex, Jellyfin, and most
+        // shipping iOS NAS clients. If Apple ever breaks it we fall back to
+        // an `AVAssetResourceLoaderDelegate` with a custom URL scheme.
         let assetOptions: [String: Any] = headers.isEmpty
             ? [:]
             : ["AVURLAssetHTTPHeaderFieldsKey": headers]

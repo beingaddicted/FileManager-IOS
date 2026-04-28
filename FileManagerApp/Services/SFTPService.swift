@@ -121,10 +121,11 @@ final class SFTPService: FileProvider {
             stream.open()
             defer { stream.close() }
 
-            // NMSSH provides write-to-stream with a progress callback that returns
-            // a Bool to indicate whether to continue (allows cancellation).
-            let ok = sftp.writeFile(atPath: resolved, to: stream) { received in
-                progress?(Self.fractionDone(received: received, total: 0))
+            // NMSSH's streaming download is `contentsAtPath:toStream:progress:`
+            // (Swift: `contents(atPath:to:progress:)`). Progress closure takes
+            // (received, total) and returns Bool to continue.
+            let ok = sftp.contents(atPath: resolved, to: stream) { received, total in
+                progress?(Self.fractionDone(received: received, total: total))
                 return true
             }
             if !ok {
@@ -140,6 +141,7 @@ final class SFTPService: FileProvider {
     func upload(_ data: Data, to path: String, progress: ProgressHandler?) async throws {
         let resolved = resolvePath(path)
         try await onQueue { sftp in
+            // `writeContents:toFileAtPath:progress:` — progress takes only `sent` bytes.
             let ok = sftp.writeContents(data, toFileAtPath: resolved) { sent in
                 progress?(Self.fractionDone(received: sent, total: UInt(data.count)))
                 return true
@@ -153,14 +155,11 @@ final class SFTPService: FileProvider {
 
     func uploadFile(at localURL: URL, to path: String, progress: ProgressHandler?) async throws {
         let resolved = resolvePath(path)
+        let total = (try? FileManager.default.attributesOfItem(atPath: localURL.path)[.size] as? Int) ?? 0
         try await onQueue { sftp in
-            guard let stream = InputStream(url: localURL) else {
-                throw FileProviderError.transferFailed("Could not open local file")
-            }
-            stream.open()
-            defer { stream.close() }
-            let total = (try? FileManager.default.attributesOfItem(atPath: localURL.path)[.size] as? Int) ?? 0
-            let ok = sftp.writeStream(stream, toFileAtPath: resolved) { sent in
+            // Prefer NMSSH's local-file-to-remote-file API; it streams via
+            // libssh2 internally and avoids wrapping an InputStream.
+            let ok = sftp.writeFile(atPath: localURL.path, toFileAtPath: resolved) { sent in
                 progress?(Self.fractionDone(received: sent, total: UInt(total)))
                 return true
             }
@@ -263,6 +262,9 @@ final class SFTPService: FileProvider {
         let path  = (parent as NSString).appendingPathComponent(name)
         let size  = file.fileSize?.int64Value ?? 0
         let url   = URL(fileURLWithPath: name)
+        // NMSFTPFile has no isSymbolicLink property; permissions strings start
+        // with "l" for symlinks (drwxr-xr-x style format from libssh2).
+        let isSymlink = (file.permissions ?? "").hasPrefix("l")
 
         return FileItem(
             id:           path,
@@ -272,7 +274,7 @@ final class SFTPService: FileProvider {
             modifiedDate: file.modificationDate ?? Date(),
             isDirectory:  isDir,
             isHidden:     name.hasPrefix("."),
-            isSymlink:    file.isSymbolicLink,
+            isSymlink:    isSymlink,
             itemType:     isDir ? .folder : FileTypeHelper.detectType(for: url),
             providerType: .sftp,
             connectionId: connectionId

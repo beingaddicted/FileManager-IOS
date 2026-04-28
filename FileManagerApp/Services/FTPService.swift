@@ -62,8 +62,24 @@ final class FTPService: FileProvider {
     }
 
     func downloadToTemp(from path: String, progress: ProgressHandler?) async throws -> URL {
+        // URLSession's `bytes(for:)` (used by `streamDownload`) is HTTP-shaped
+        // and works unevenly with the legacy ftp:// loader. Use the standard
+        // `download(for:)` which handles FTP correctly; we lose byte-by-byte
+        // progress but FTP is the niche-of-last-resort here.
         let req = authorisedRequest(url: ftpURL(for: resolvePath(path)))
-        return try await session.streamDownload(for: req, progress: progress)
+        let (tempURL, response) = try await session.download(for: req)
+        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            try? FileManager.default.removeItem(at: tempURL)
+            throw FileProviderError.serverError(http.statusCode, HTTPURLResponse.localizedString(forStatusCode: http.statusCode))
+        }
+        // `download(for:)` returns a URL inside Caches that gets reaped by iOS.
+        // Move it into our standard temp area so the caller owns its lifetime.
+        let dst = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension(URL(fileURLWithPath: path).pathExtension)
+        try FileManager.default.moveItem(at: tempURL, to: dst)
+        progress?(1.0)
+        return dst
     }
 
     func upload(_ data: Data, to path: String, progress: ProgressHandler?) async throws {

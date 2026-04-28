@@ -71,13 +71,18 @@ final class SMBService: FileProvider {
         guard let client = client else { throw FileProviderError.notConnected }
         let inSharePath = Self.pathInsideShare(connection.basePath, requested: path)
         let entries = try await client.contentsOfDirectory(atPath: inSharePath)
-        return entries.compactMap { Self.makeItem(from: $0, parent: inSharePath, connectionId: connection.id) }
+        return entries.compactMap { entry in
+            Self.makeItem(from: Self.bridge(entry), parent: inSharePath, connectionId: connection.id)
+        }
     }
 
     func getInfo(at path: String) async throws -> FileItem {
         guard let client = client else { throw FileProviderError.notConnected }
         let inShare = Self.pathInsideShare(connection.basePath, requested: path)
-        let attrs   = try await client.attributesOfItem(atPath: inShare)
+        // AMSMB2's attributesOfItem returns `[URLResourceKey: any Sendable]` on
+        // recent versions; bridge through a homogeneous `[URLResourceKey: Any]`
+        // so makeItem doesn't have to know about Sendable existentials.
+        let attrs   = Self.bridge(try await client.attributesOfItem(atPath: inShare))
         let parent  = (inShare as NSString).deletingLastPathComponent
         return Self.makeItem(from: attrs, parent: parent, connectionId: connection.id)
             ?? FileItem(
@@ -126,9 +131,13 @@ final class SMBService: FileProvider {
     func uploadFile(at localURL: URL, to path: String, progress: ProgressHandler?) async throws {
         guard let client = client else { throw FileProviderError.notConnected }
         let inShare = Self.pathInsideShare(connection.basePath, requested: path)
-        try await client.uploadItem(at: localURL, toPath: inShare) { transferred, total in
+        // AMSMB2's `uploadItem` uses `WriteProgressHandler = (Int64) -> Bool`
+        // (single arg = bytes sent). Compute total from local file size for
+        // the percentage we expose.
+        let total = (try? FileManager.default.attributesOfItem(atPath: localURL.path)[.size] as? Int64) ?? 0
+        try await client.uploadItem(at: localURL, toPath: inShare) { sent in
             if total > 0 {
-                progress?(Double(transferred) / Double(total))
+                progress?(Double(sent) / Double(total))
             }
             return true
         }
@@ -198,6 +207,16 @@ final class SMBService: FileProvider {
             return ""
         }
         return trimmed
+    }
+
+    /// Bridges AMSMB2's `[URLResourceKey: any Sendable]` to a plain
+    /// `[URLResourceKey: Any]` so the rest of the file doesn't have to
+    /// thread the Sendable existential through.
+    private static func bridge<S>(_ dict: [URLResourceKey: S]) -> [URLResourceKey: Any] {
+        var out: [URLResourceKey: Any] = [:]
+        out.reserveCapacity(dict.count)
+        for (key, value) in dict { out[key] = value }
+        return out
     }
 
     private static func makeItem(
