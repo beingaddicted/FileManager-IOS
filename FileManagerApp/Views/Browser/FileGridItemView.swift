@@ -57,33 +57,35 @@ struct FileGridItemView: View {
 
     @ViewBuilder
     private var iconView: some View {
-        if let img = thumbnail {
-            Image(uiImage: img)
-                .resizable()
-                .aspectRatio(contentMode: .fill)
-        } else {
-            ZStack {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(item.accentColor.opacity(0.12))
+        ZStack {
+            // Placeholder underneath; the resolved thumbnail fades in on top.
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(item.accentColor.opacity(0.12))
 
-                if item.isDirectory {
-                    Image(systemName: "folder.fill")
-                        .font(.system(size: 48))
+            if item.isDirectory {
+                Image(systemName: "folder.fill")
+                    .font(.system(size: 48))
+                    .foregroundStyle(item.accentColor)
+            } else {
+                VStack(spacing: 4) {
+                    Image(systemName: item.systemImage)
+                        .font(.system(size: 32))
                         .foregroundStyle(item.accentColor)
-                } else {
-                    VStack(spacing: 4) {
-                        Image(systemName: item.systemImage)
-                            .font(.system(size: 32))
-                            .foregroundStyle(item.accentColor)
-
-                        if !item.fileExtension.isEmpty {
-                            Text(item.fileExtension.uppercased())
-                                .font(.system(size: 9, weight: .bold))
-                                .foregroundStyle(item.accentColor.opacity(0.7))
-                        }
+                    if !item.fileExtension.isEmpty {
+                        Text(item.fileExtension.uppercased())
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(item.accentColor.opacity(0.7))
                     }
                 }
             }
+
+            if let img = thumbnail {
+                Image(uiImage: img)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .transition(.opacity.animation(.easeOut(duration: 0.2)))
+            }
         }
+        .animation(.easeOut(duration: 0.2), value: thumbnail != nil)
     }
 }

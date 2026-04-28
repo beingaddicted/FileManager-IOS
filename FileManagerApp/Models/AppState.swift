@@ -1,6 +1,6 @@
 import Foundation
 import SwiftUI
-import Combine
+import Observation
 
 // MARK: - Enums
 
@@ -34,45 +34,46 @@ enum AppTheme: String, CaseIterable, Codable {
 
 // MARK: - AppState
 
+@Observable
 @MainActor
-final class AppState: ObservableObject {
+final class AppState {
     // Navigation
-    @Published var selectedTab: AppTab = .local
-    @Published var activeConnection: ServerConnection?
+    var selectedTab: AppTab = .local
+    var activeConnection: ServerConnection?
 
     // Preferences
-    @Published var viewMode: ViewMode = .list
-    @Published var sortField: SortField = .name
-    @Published var sortAscending: Bool = true
-    @Published var showHiddenFiles: Bool = false
-    @Published var theme: AppTheme = .system
-    @Published var thumbnailsEnabled: Bool = true
-    @Published var previewOnTap: Bool = true
+    var viewMode: ViewMode = .list
+    var sortField: SortField = .name
+    var sortAscending: Bool = true
+    var showHiddenFiles: Bool = false
+    var theme: AppTheme = .system
+    var thumbnailsEnabled: Bool = true
+    var previewOnTap: Bool = true
 
     // Connections (persisted)
-    @Published var connections: [ServerConnection] = [] {
+    var connections: [ServerConnection] = [] {
         didSet { saveConnections() }
     }
 
     // Recent & favorites (persisted)
-    @Published var recentFiles: [FileItem] = [] {
+    var recentFiles: [FileItem] = [] {
         didSet { saveRecents() }
     }
-    @Published var favorites: [FileItem] = [] {
+    var favorites: [FileItem] = [] {
         didSet { saveFavorites() }
     }
-    @Published var localPinnedLocations: [LocalPinnedLocation] = [] {
+    var localPinnedLocations: [LocalPinnedLocation] = [] {
         didSet { saveLocalPinnedLocations() }
     }
 
     // Global error banner
-    @Published var alertError: String?
-    @Published var incomingPreviewItem: FileItem?
+    var alertError: String?
+    var incomingPreviewItem: FileItem?
 
-    private let connectionsKey = "app_connections_v2"
-    private let recentsKey     = "app_recents_v1"
-    private let favoritesKey   = "app_favorites_v1"
-    private let pinnedLocalKey = "app_local_pinned_v1"
+    @ObservationIgnored private let connectionsKey = "app_connections_v2"
+    @ObservationIgnored private let recentsKey     = "app_recents_v1"
+    @ObservationIgnored private let favoritesKey   = "app_favorites_v1"
+    @ObservationIgnored private let pinnedLocalKey = "app_local_pinned_v1"
 
     init() {
         loadAll()
@@ -205,29 +206,29 @@ struct LocalPinnedLocation: Codable, Hashable, Identifiable {
 // MARK: - App Tabs
 
 enum AppTab: String, CaseIterable {
-    case local   = "local"
-    case network = "network"
-    case cloud   = "cloud"
-    case recents = "recents"
-    case settings = "settings"
+    case local     = "local"
+    case network   = "network"
+    case transfers = "transfers"
+    case recents   = "recents"
+    case settings  = "settings"
 
     var title: String {
         switch self {
-        case .local:   return "Local"
-        case .network: return "Network"
-        case .cloud:   return "Cloud"
-        case .recents: return "Recents"
-        case .settings:return "Settings"
+        case .local:     return "Files"
+        case .network:   return "Servers"
+        case .transfers: return "Transfers"
+        case .recents:   return "Recents"
+        case .settings:  return "Settings"
         }
     }
 
     var systemImage: String {
         switch self {
-        case .local:   return "internaldrive.fill"
-        case .network: return "network"
-        case .cloud:   return "cloud.fill"
-        case .recents: return "clock.fill"
-        case .settings:return "gearshape.fill"
+        case .local:     return "internaldrive.fill"
+        case .network:   return "externaldrive.connected.to.line.below.fill"
+        case .transfers: return "arrow.up.arrow.down.circle.fill"
+        case .recents:   return "clock.fill"
+        case .settings:  return "gearshape.fill"
         }
     }
 }

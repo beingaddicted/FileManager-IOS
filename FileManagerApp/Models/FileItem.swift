@@ -91,51 +91,35 @@ enum FileItemType: String, Codable, CaseIterable {
 enum ProviderType: String, Codable, CaseIterable, Identifiable {
     var id: String { rawValue }
 
-    case local      = "On This Device"
-    case iCloud     = "iCloud Drive"
-    case googleDrive = "Google Drive"
-    case dropbox    = "Dropbox"
-    case oneDrive   = "OneDrive"
-    case ftp        = "FTP"
-    case sftp       = "SFTP"
-    case smb        = "SMB / Windows Share"
-    case webdav     = "WebDAV"
-    case upnp       = "UPnP / DLNA"
+    case local  = "On This Device"
+    case iCloud = "iCloud Drive"
+    case smb    = "SMB / Windows Share"
+    case sftp   = "SFTP"
+    case webdav = "WebDAV"
+    case ftp    = "FTP"
+    case upnp   = "UPnP / DLNA"
 
     var systemImage: String {
         switch self {
-        case .local:        return "internaldrive.fill"
-        case .iCloud:       return "icloud.fill"
-        case .googleDrive:  return "square.stack.3d.up.fill"
-        case .dropbox:      return "shippingbox.fill"
-        case .oneDrive:     return "cloud.fill"
-        case .ftp:          return "network"
-        case .sftp:         return "lock.shield.fill"
-        case .smb:          return "desktopcomputer"
-        case .webdav:       return "globe"
-        case .upnp:         return "tv.fill"
+        case .local:  return "internaldrive.fill"
+        case .iCloud: return "icloud.fill"
+        case .smb:    return "desktopcomputer"
+        case .sftp:   return "lock.shield.fill"
+        case .webdav: return "globe"
+        case .ftp:    return "network"
+        case .upnp:   return "tv.fill"
         }
     }
 
     var tintColor: Color {
         switch self {
-        case .local:        return .blue
-        case .iCloud:       return .cyan
-        case .googleDrive:  return .green
-        case .dropbox:      return Color(red: 0.0, green: 0.47, blue: 1.0)
-        case .oneDrive:     return Color(red: 0.0, green: 0.47, blue: 0.87)
-        case .ftp:          return .orange
-        case .sftp:         return .purple
-        case .smb:          return Color(.systemGray)
-        case .webdav:       return .teal
-        case .upnp:         return .red
-        }
-    }
-
-    var isCloud: Bool {
-        switch self {
-        case .iCloud, .googleDrive, .dropbox, .oneDrive: return true
-        default: return false
+        case .local:  return .blue
+        case .iCloud: return .cyan
+        case .smb:    return Color(.systemBlue)
+        case .sftp:   return .purple
+        case .webdav: return .teal
+        case .ftp:    return .orange
+        case .upnp:   return .red
         }
     }
 

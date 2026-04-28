@@ -10,6 +10,7 @@ struct UniversalPreviewView: View {
     let provider: FileBrowserViewModel
 
     @State private var localURL: URL?
+    @State private var streamingTarget: StreamingTarget?
     @State private var isLoading: Bool = true
     @State private var loadError: String?
     @State private var textContent: String?
@@ -25,8 +26,8 @@ struct UniversalPreviewView: View {
                     loadingView
                 } else if let err = loadError {
                     errorView(err)
-                } else if let url = localURL {
-                    previewContent(url: url)
+                } else {
+                    previewContent
                 }
             }
             .navigationTitle(item.name)
@@ -67,22 +68,31 @@ struct UniversalPreviewView: View {
     // MARK: - Preview content router
 
     @ViewBuilder
-    private func previewContent(url: URL) -> some View {
-        switch resolvedType ?? item.itemType {
-        case .image:
-            ImagePreviewView(url: url)
-
+    private var previewContent: some View {
+        let type = resolvedType ?? item.itemType
+        switch type {
         case .video:
-            MediaPlayerView(url: url, itemType: .video)
+            if let target = streamingTarget {
+                MediaPlayerView(streamingTarget: target, itemType: .video)
+            } else if let url = localURL {
+                MediaPlayerView(url: url, itemType: .video)
+            }
 
         case .audio:
-            MediaPlayerView(url: url, itemType: .audio)
+            if let target = streamingTarget {
+                MediaPlayerView(streamingTarget: target, itemType: .audio)
+            } else if let url = localURL {
+                MediaPlayerView(url: url, itemType: .audio)
+            }
+
+        case .image:
+            if let url = localURL { ImagePreviewView(url: url) }
 
         case .pdf:
-            PDFPreviewView(url: url)
+            if let url = localURL { PDFPreviewView(url: url) }
 
         case .text, .code:
-            if let content = textContent {
+            if let url = localURL, let content = textContent {
                 TextEditorView(
                     item:       item,
                     content:    content,
@@ -90,10 +100,11 @@ struct UniversalPreviewView: View {
                 ) { newText in
                     Task { await saveText(newText) }
                 }
+                .id(url)
             }
 
         default:
-            QuickLookPreviewView(url: url)
+            if let url = localURL { QuickLookPreviewView(url: url) }
         }
     }
 
@@ -101,8 +112,7 @@ struct UniversalPreviewView: View {
 
     private var loadingView: some View {
         VStack(spacing: 20) {
-            ProgressView()
-                .scaleEffect(1.5)
+            ProgressView().scaleEffect(1.5)
             Text("Loading \(item.name)…")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
@@ -114,14 +124,12 @@ struct UniversalPreviewView: View {
             Image(systemName: "exclamationmark.triangle.fill")
                 .font(.system(size: 56))
                 .foregroundStyle(.red.opacity(0.7))
-            Text("Cannot preview this file")
-                .font(.headline)
+            Text("Cannot preview this file").font(.headline)
             Text(message)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
-
             Button("Try Opening With Another App") {
                 showOpenWith = true
             }
@@ -134,13 +142,35 @@ struct UniversalPreviewView: View {
     private func loadFile() async {
         isLoading = true
         loadError = nil
+
+        // Fast path: if media and streaming is available, skip the download.
+        let presumedType: FileItemType = item.itemType
+        if (presumedType == .video || presumedType == .audio),
+           let target = provider.streamingTarget(for: item) {
+            streamingTarget = target
+            resolvedType = presumedType
+            isLoading = false
+            return
+        }
+
+        // Offline cache hit: avoid re-downloading pinned files.
+        if let cached = provider.cachedOfflineURL(for: item) {
+            localURL = cached
+            resolvedType = await resolvePreferredType(using: cached)
+            if (resolvedType == .text || resolvedType == .code || presumedType == .text || presumedType == .code) {
+                textContent = try? decodeTextFile(at: cached)
+            }
+            isLoading = false
+            return
+        }
+
         do {
             guard let url = await provider.download(item) else {
                 throw FileProviderError.fileNotFound(item.path)
             }
             localURL = url
             resolvedType = await resolvePreferredType(using: url)
-            if (resolvedType == .text || resolvedType == .code || item.itemType == .text || item.itemType == .code) {
+            if (resolvedType == .text || resolvedType == .code || presumedType == .text || presumedType == .code) {
                 textContent = try decodeTextFile(at: url)
             }
         } catch {
@@ -166,20 +196,15 @@ struct UniversalPreviewView: View {
         if data.isLikelyBinary {
             throw FileProviderError.transferFailed("This file looks binary and cannot be opened as text.")
         }
-
-        // Pattern inspired by mature text editors: try BOM-aware and common legacy encodings.
         let candidates: [String.Encoding] = [
             .utf8, .utf16, .utf16LittleEndian, .utf16BigEndian,
             .utf32, .unicode, .windowsCP1252, .isoLatin1, .ascii
         ]
-
         for encoding in candidates {
             if let text = String(data: data, encoding: encoding) {
                 return text
             }
         }
-
-        var nsEncoding: UInt = 0
         var converted: NSString?
         let detected = NSString.stringEncoding(
             for: data,
@@ -187,14 +212,10 @@ struct UniversalPreviewView: View {
             convertedString: &converted,
             usedLossyConversion: nil
         )
-        if detected != 0 {
-            nsEncoding = detected
-        }
-        if nsEncoding != 0,
-           let text = String(data: data, encoding: String.Encoding(rawValue: nsEncoding)) {
+        if detected != 0,
+           let text = String(data: data, encoding: String.Encoding(rawValue: detected)) {
             return text
         }
-
         throw FileProviderError.transferFailed("Unsupported text encoding.")
     }
 
@@ -202,7 +223,6 @@ struct UniversalPreviewView: View {
         if [.image, .video, .audio, .pdf, .text, .code].contains(item.itemType) {
             return item.itemType
         }
-
         if let mime = item.mimeType?.lowercased() {
             if mime.hasPrefix("image/") { return .image }
             if mime.hasPrefix("video/") { return .video }
@@ -210,17 +230,10 @@ struct UniversalPreviewView: View {
             if mime == "application/pdf" { return .pdf }
             if mime.hasPrefix("text/") { return .text }
         }
-
         let nameExt = URL(fileURLWithPath: item.name).pathExtension.lowercased()
-        if let byName = FileTypeHelper.typeFromExtension(nameExt) {
-            return byName
-        }
-
+        if let byName = FileTypeHelper.typeFromExtension(nameExt) { return byName }
         let localExt = localURL.pathExtension.lowercased()
-        if let byLocal = FileTypeHelper.typeFromExtension(localExt) {
-            return byLocal
-        }
-
+        if let byLocal = FileTypeHelper.typeFromExtension(localExt) { return byLocal }
         if let type = UTType(filenameExtension: nameExt.isEmpty ? localExt : nameExt) {
             if type.conforms(to: .image) { return .image }
             if type.conforms(to: .movie) { return .video }
@@ -229,23 +242,14 @@ struct UniversalPreviewView: View {
             if type.conforms(to: .text) { return .text }
             if type.conforms(to: .sourceCode) { return .code }
         }
-
-        // Expensive AV probing only as a final fallback for unknown/ambiguous media.
-        if let mediaKind = await detectMediaKind(from: localURL) {
-            return mediaKind
-        }
-
+        if let mediaKind = await detectMediaKind(from: localURL) { return mediaKind }
         return .unknown
     }
 
     private func detectMediaKind(from localURL: URL) async -> FileItemType? {
         let asset = AVURLAsset(url: localURL)
-        if let hasVideo = try? await asset.loadTracks(withMediaType: .video), !hasVideo.isEmpty {
-            return .video
-        }
-        if let hasAudio = try? await asset.loadTracks(withMediaType: .audio), !hasAudio.isEmpty {
-            return .audio
-        }
+        if let hasVideo = try? await asset.loadTracks(withMediaType: .video), !hasVideo.isEmpty { return .video }
+        if let hasAudio = try? await asset.loadTracks(withMediaType: .audio), !hasAudio.isEmpty { return .audio }
         return nil
     }
 }
@@ -256,7 +260,6 @@ private extension Data {
         let sampleSize = Swift.min(count, 4096)
         let sample = self.prefix(sampleSize)
         if sample.contains(0) { return true }
-
         let controlBytes = sample.filter { byte in
             (byte < 0x09) || (byte > 0x0D && byte < 0x20)
         }.count
@@ -284,7 +287,6 @@ struct QuickLookPreviewView: UIViewControllerRepresentable {
     final class Coordinator: NSObject, QLPreviewControllerDataSource {
         let url: URL
         init(url: URL) { self.url = url }
-
         func numberOfPreviewItems(in controller: QLPreviewController) -> Int { 1 }
         func previewController(_ controller: QLPreviewController,
                                previewItemAt index: Int) -> QLPreviewItem {

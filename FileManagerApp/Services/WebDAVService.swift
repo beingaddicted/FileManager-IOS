@@ -1,6 +1,9 @@
 import Foundation
 
 // MARK: - WebDAV Service
+//
+// Streaming-first WebDAV (RFC 4918) client. Supports Synology, Nextcloud,
+// ownCloud, mod_dav, sabredav, and Box-style WebDAV endpoints.
 
 final class WebDAVService: FileProvider {
     let providerType: ProviderType = .webdav
@@ -8,25 +11,28 @@ final class WebDAVService: FileProvider {
 
     private let connection: ServerConnection
     private var password: String { KeychainHelper.shared.password(for: connection) }
-    private var session: URLSession
-    private var baseURL: URL
+    /// Single shared URLSession across every `WebDAVService` instance. Each
+    /// one used to spin up its own session, which meant five saved WebDAV
+    /// servers got five independent connection pools and five sets of
+    /// HTTP/2 streams. URLSession internally pools connections per
+    /// `(scheme, host, port)`, so giving them all the same session lets the
+    /// OS share TCP connections and TLS sessions across services that hit
+    /// the same NAS.
+    private let session: URLSession = WebDAVSharedSession.shared
+    private let baseURL: URL
     private let rootPath: String
 
     init(connection: ServerConnection) {
         self.connection = connection
-        let scheme      = connection.usesSSL ? "https" : "http"
-        let port        = connection.port
-        self.baseURL    = URL(string: "\(scheme)://\(connection.host):\(port)") ?? URL(string: "http://localhost")!
-        let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 30
-        config.timeoutIntervalForResource = 120
-        config.waitsForConnectivity = true
-        self.session = URLSession(configuration: config)
-        let normalizedBase = connection.basePath.trimmingCharacters(in: .whitespacesAndNewlines)
-        if normalizedBase.isEmpty || normalizedBase == "/" {
+        let scheme   = connection.usesSSL ? "https" : "http"
+        let port     = connection.port
+        self.baseURL = URL(string: "\(scheme)://\(connection.host):\(port)") ?? URL(string: "http://localhost")!
+
+        let normalized = connection.basePath.trimmingCharacters(in: .whitespacesAndNewlines)
+        if normalized.isEmpty || normalized == "/" {
             self.rootPath = "/"
         } else {
-            self.rootPath = normalizedBase.hasPrefix("/") ? normalizedBase : "/\(normalizedBase)"
+            self.rootPath = normalized.hasPrefix("/") ? normalized : "/\(normalized)"
         }
     }
 
@@ -39,15 +45,13 @@ final class WebDAVService: FileProvider {
 
     func disconnect() { isConnected = false }
 
-    // MARK: - List
+    // MARK: - List / Info
 
     func listDirectory(at path: String) async throws -> [FileItem] {
         let xml   = try await propfind(path: path, depth: "1")
         let items = try parseMultiStatus(xml: xml, basePath: path)
-        return items.filter { $0.path != path }   // remove self
+        return items.filter { $0.path != path }
     }
-
-    // MARK: - Info
 
     func getInfo(at path: String) async throws -> FileItem {
         let xml   = try await propfind(path: path, depth: "0")
@@ -56,21 +60,17 @@ final class WebDAVService: FileProvider {
         return item
     }
 
-    // MARK: - Download
+    // MARK: - Download (streaming → file URL)
 
-    func download(from path: String, progress: ProgressHandler?) async throws -> Data {
-        var req = request(method: "GET", path: path)
-        req.setValue("application/octet-stream", forHTTPHeaderField: "Accept")
-        let (data, response) = try await session.data(for: req)
-        try validate(response, path: path)
-        progress?(1.0)
-        return data
+    func downloadToTemp(from path: String, progress: ProgressHandler?) async throws -> URL {
+        let req = authorizedRequest(method: "GET", path: path)
+        return try await session.streamDownload(for: req, progress: progress)
     }
 
     // MARK: - Upload
 
     func upload(_ data: Data, to path: String, progress: ProgressHandler?) async throws {
-        var req       = request(method: "PUT", path: path)
+        var req       = authorizedRequest(method: "PUT", path: path)
         req.httpBody  = data
         req.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
         req.setValue("\(data.count)", forHTTPHeaderField: "Content-Length")
@@ -79,23 +79,27 @@ final class WebDAVService: FileProvider {
         progress?(1.0)
     }
 
-    // MARK: - Delete
+    func uploadFile(at localURL: URL, to path: String, progress: ProgressHandler?) async throws {
+        // Use upload(fromFile:) so large files don't hit RAM.
+        let req = authorizedRequest(method: "PUT", path: path)
+        let (_, response) = try await session.upload(for: req, fromFile: localURL)
+        try validate(response, path: path)
+        progress?(1.0)
+    }
+
+    // MARK: - Mutating ops
 
     func delete(at path: String) async throws {
-        let req = request(method: "DELETE", path: path)
+        let req = authorizedRequest(method: "DELETE", path: path)
         let (_, response) = try await session.data(for: req)
         try validate(response, path: path)
     }
-
-    // MARK: - Create directory
 
     func createDirectory(at path: String) async throws {
-        let req = request(method: "MKCOL", path: path)
+        let req = authorizedRequest(method: "MKCOL", path: path)
         let (_, response) = try await session.data(for: req)
         try validate(response, path: path)
     }
-
-    // MARK: - Rename / Move
 
     func rename(at path: String, to newName: String) async throws {
         let parent = (path as NSString).deletingLastPathComponent
@@ -104,7 +108,7 @@ final class WebDAVService: FileProvider {
     }
 
     func move(from src: String, to dst: String) async throws {
-        var req = request(method: "MOVE", path: src)
+        var req = authorizedRequest(method: "MOVE", path: src)
         req.setValue(absoluteURL(for: dst).absoluteString, forHTTPHeaderField: "Destination")
         req.setValue("T", forHTTPHeaderField: "Overwrite")
         let (_, response) = try await session.data(for: req)
@@ -112,30 +116,62 @@ final class WebDAVService: FileProvider {
     }
 
     func copy(from src: String, to dst: String) async throws {
-        var req = request(method: "COPY", path: src)
+        var req = authorizedRequest(method: "COPY", path: src)
         req.setValue(absoluteURL(for: dst).absoluteString, forHTTPHeaderField: "Destination")
         req.setValue("T", forHTTPHeaderField: "Overwrite")
         let (_, response) = try await session.data(for: req)
         try validate(response, path: src)
     }
 
+    // MARK: - Background-session requests
+    //
+    // BackgroundWebDAVSession runs these on a `.background` URLSession so
+    // big transfers keep going while the app is suspended.
+
+    func backgroundDownloadRequest(for path: String) -> URLRequest? {
+        authorizedRequest(method: "GET", path: path)
+    }
+
+    func backgroundUploadRequest(for path: String, sourceFile: URL) -> URLRequest? {
+        var req = authorizedRequest(method: "PUT", path: path)
+        // Background uploadTask reads the body from a file URL, not httpBody.
+        if let size = (try? FileManager.default.attributesOfItem(atPath: sourceFile.path)[.size] as? Int64) {
+            req.setValue("\(size)", forHTTPHeaderField: "Content-Length")
+        }
+        req.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+        return req
+    }
+
+    // MARK: - Streaming URL for AVPlayer
+
+    func streamingURL(for path: String) -> StreamingTarget? {
+        var headers: [String: String] = [:]
+        if !connection.anonymousLogin {
+            let creds   = "\(connection.username):\(password)"
+            let encoded = Data(creds.utf8).base64EncodedString()
+            headers["Authorization"] = "Basic \(encoded)"
+        }
+        return StreamingTarget(url: absoluteURL(for: path), headers: headers)
+    }
+
     // MARK: - Private
 
     private func propfind(path: String, depth: String) async throws -> Data {
-        var req = request(method: "PROPFIND", path: path)
+        var req = authorizedRequest(method: "PROPFIND", path: path)
         req.setValue(depth, forHTTPHeaderField: "Depth")
         req.setValue("application/xml", forHTTPHeaderField: "Content-Type")
         req.httpBody = """
         <?xml version="1.0" encoding="utf-8"?>
         <D:propfind xmlns:D="DAV:">
-            <D:prop>
-                <D:displayname/>
-                <D:resourcetype/>
-                <D:getcontentlength/>
-                <D:getlastmodified/>
-                <D:creationdate/>
-                <D:getetag/>
-            </D:prop>
+          <D:prop>
+            <D:displayname/>
+            <D:resourcetype/>
+            <D:getcontentlength/>
+            <D:getlastmodified/>
+            <D:creationdate/>
+            <D:getetag/>
+            <D:getcontenttype/>
+          </D:prop>
         </D:propfind>
         """.data(using: .utf8)
 
@@ -144,9 +180,10 @@ final class WebDAVService: FileProvider {
         return data
     }
 
-    private func request(method: String, path: String) -> URLRequest {
+    private func authorizedRequest(method: String, path: String) -> URLRequest {
         var req = URLRequest(url: absoluteURL(for: path))
         req.httpMethod = method
+        req.setValue("Mozilla/5.0 (FileManagerApp WebDAV/2.0)", forHTTPHeaderField: "User-Agent")
         if !connection.anonymousLogin {
             let creds   = "\(connection.username):\(password)"
             let encoded = Data(creds.utf8).base64EncodedString()
@@ -156,9 +193,12 @@ final class WebDAVService: FileProvider {
     }
 
     private func absoluteURL(for path: String) -> URL {
-        let resolvedPath = resolvePath(path)
+        let resolved = resolvePath(path)
         var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
-        components?.path = resolvedPath
+        // WebDAV servers vary on percent-encoding; use a path-allowed escape so
+        // names with spaces / Unicode round-trip correctly.
+        let encoded = resolved.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? resolved
+        components?.percentEncodedPath = encoded
         return components?.url ?? baseURL
     }
 
@@ -187,12 +227,34 @@ final class WebDAVService: FileProvider {
         }
     }
 
-    // MARK: - XML parser for DAV multistatus
-
     private func parseMultiStatus(xml: Data, basePath: String) throws -> [FileItem] {
-        let parser = DAVMultiStatusParser(data: xml, basePath: basePath, connectionId: connection.id)
-        return try parser.parse()
+        try DAVMultiStatusParser(data: xml, basePath: basePath, connectionId: connection.id).parse()
     }
+}
+
+// MARK: - Shared session
+//
+// Process-wide foreground URLSession used by every WebDAVService. URLSession
+// pools TCP / TLS connections per (scheme, host, port) internally — but only
+// across requests issued through the *same* session. Sharing one session
+// across all services lets HTTP/2 connection reuse work as designed when
+// one user has multiple WebDAV servers behind the same hostname (Synology
+// + Synology Photos + Synology Drive on one box, for example).
+//
+// Background transfers go through `BackgroundWebDAVSession`, which has its
+// own `.background(withIdentifier:)` configuration.
+
+private enum WebDAVSharedSession {
+    static let shared: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest      = 30
+        config.timeoutIntervalForResource     = 3600
+        config.waitsForConnectivity           = true
+        config.httpMaximumConnectionsPerHost  = 6
+        config.requestCachePolicy             = .reloadIgnoringLocalCacheData
+        // WebDAV servers vary on cookie use; keep the default cookie store.
+        return URLSession(configuration: config)
+    }()
 }
 
 // MARK: - DAV XML Parser
@@ -203,14 +265,15 @@ private final class DAVMultiStatusParser: NSObject, XMLParserDelegate {
     private let connectionId: UUID
     private var items: [FileItem] = []
 
-    private var currentHref        = ""
-    private var currentDisplayName = ""
-    private var currentSize        = ""
-    private var currentModified    = ""
-    private var currentCreated     = ""
+    private var currentHref         = ""
+    private var currentDisplayName  = ""
+    private var currentSize         = ""
+    private var currentModified     = ""
+    private var currentCreated      = ""
+    private var currentContentType  = ""
     private var currentIsCollection = false
-    private var inResponse         = false
-    private var currentElement     = ""
+    private var inResponse          = false
+    private var currentElement      = ""
     private var parseError: Error?
 
     init(data: Data, basePath: String, connectionId: UUID) {
@@ -239,6 +302,7 @@ private final class DAVMultiStatusParser: NSObject, XMLParserDelegate {
             currentSize         = ""
             currentModified     = ""
             currentCreated      = ""
+            currentContentType  = ""
             currentIsCollection = false
         }
     }
@@ -247,12 +311,13 @@ private final class DAVMultiStatusParser: NSObject, XMLParserDelegate {
         let s = string.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !s.isEmpty else { return }
         switch currentElement {
-        case "href":         currentHref        += s
-        case "displayname":  currentDisplayName += s
-        case "getcontentlength": currentSize    += s
-        case "getlastmodified":  currentModified += s
-        case "creationdate":     currentCreated  += s
-        case "collection":       currentIsCollection = true
+        case "href":              currentHref        += s
+        case "displayname":       currentDisplayName += s
+        case "getcontentlength":  currentSize        += s
+        case "getlastmodified":   currentModified    += s
+        case "creationdate":      currentCreated     += s
+        case "getcontenttype":    currentContentType += s
+        case "collection":        currentIsCollection = true
         default: break
         }
     }
@@ -263,8 +328,8 @@ private final class DAVMultiStatusParser: NSObject, XMLParserDelegate {
         guard local == "response", inResponse else { return }
         inResponse = false
 
-        let path   = currentHref.removingPercentEncoding ?? currentHref
-        let name   = currentDisplayName.isEmpty
+        let path = currentHref.removingPercentEncoding ?? currentHref
+        let name = currentDisplayName.isEmpty
             ? (path as NSString).lastPathComponent
             : currentDisplayName
         guard !name.isEmpty, name != ".", name != ".." else { return }
@@ -273,10 +338,10 @@ private final class DAVMultiStatusParser: NSObject, XMLParserDelegate {
         let url  = URL(fileURLWithPath: path)
 
         items.append(FileItem(
-            id: path,
-            name: name,
-            path: path,
-            size: currentIsCollection ? 0 : size,
+            id:           path,
+            name:         name,
+            path:         path,
+            size:         currentIsCollection ? 0 : size,
             modifiedDate: parseDate(currentModified),
             createdDate:  parseDate(currentCreated),
             isDirectory:  currentIsCollection,
@@ -284,12 +349,18 @@ private final class DAVMultiStatusParser: NSObject, XMLParserDelegate {
             isSymlink:    false,
             itemType:     currentIsCollection ? .folder : FileTypeHelper.detectType(for: url),
             providerType: .webdav,
+            mimeType:     currentContentType.isEmpty ? nil : currentContentType,
             connectionId: connectionId
         ))
     }
 
     private func parseDate(_ str: String) -> Date {
-        let fmts = ["EEE, dd MMM yyyy HH:mm:ss zzz", "yyyy-MM-dd'T'HH:mm:ssZ", "yyyy-MM-dd'T'HH:mm:ssXXXXX"]
+        let fmts = [
+            "EEE, dd MMM yyyy HH:mm:ss zzz",
+            "yyyy-MM-dd'T'HH:mm:ssZ",
+            "yyyy-MM-dd'T'HH:mm:ss'Z'",
+            "yyyy-MM-dd'T'HH:mm:ssXXXXX"
+        ]
         let f = DateFormatter()
         f.locale = Locale(identifier: "en_US_POSIX")
         for fmt in fmts {

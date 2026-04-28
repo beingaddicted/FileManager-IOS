@@ -1,6 +1,7 @@
 import SwiftUI
 import AVKit
 import AVFoundation
+import Observation
 
 // MARK: - Media Player (Audio + Video)
 
@@ -8,14 +9,26 @@ struct MediaPlayerView: View {
     let url: URL
     let itemType: FileItemType
 
-    @StateObject private var playerVM: MediaPlayerViewModel
+    @State private var playerVM: MediaPlayerViewModel
     @State private var showControls: Bool = true
     @State private var controlsTimer: Timer?
 
     init(url: URL, itemType: FileItemType) {
         self.url      = url
         self.itemType = itemType
-        self._playerVM = StateObject(wrappedValue: MediaPlayerViewModel(url: url))
+        self._playerVM = State(initialValue: MediaPlayerViewModel(url: url, headers: [:]))
+    }
+
+    /// Streaming initializer — used when we want to play directly from a NAS
+    /// without downloading the whole file first. Auth headers are forwarded to
+    /// `AVURLAsset` via `AVURLAssetHTTPHeaderFieldsKey`.
+    init(streamingTarget: StreamingTarget, itemType: FileItemType) {
+        self.url      = streamingTarget.url
+        self.itemType = itemType
+        self._playerVM = State(initialValue: MediaPlayerViewModel(
+            url: streamingTarget.url,
+            headers: streamingTarget.headers
+        ))
     }
 
     var body: some View {
@@ -39,7 +52,8 @@ struct MediaPlayerView: View {
     }
 
     private var videoControls: some View {
-        VStack {
+        @Bindable var playerVM = playerVM
+        return VStack {
             Spacer()
             VStack(spacing: 0) {
                 // Scrubber
@@ -92,7 +106,8 @@ struct MediaPlayerView: View {
     // MARK: - Audio
 
     private var audioView: some View {
-        VStack(spacing: 32) {
+        @Bindable var playerVM = playerVM
+        return VStack(spacing: 32) {
             Spacer()
 
             // Album art placeholder
@@ -221,20 +236,34 @@ struct VideoPlayerRepresented: UIViewRepresentable {
 
 // MARK: - MediaPlayerViewModel
 
+@Observable
 @MainActor
-final class MediaPlayerViewModel: ObservableObject {
-    @Published var isPlaying: Bool   = false
-    @Published var currentTime: Double = 0
-    @Published var duration: Double  = 0
-    @Published var volume: Float     = 1.0 {
+final class MediaPlayerViewModel {
+    var isPlaying: Bool   = false
+    var currentTime: Double = 0
+    var duration: Double  = 0
+    var volume: Float     = 1.0 {
         didSet { player.volume = volume }
     }
 
-    let player: AVPlayer
-    private var timeObserver: Any?
+    @ObservationIgnored let player: AVPlayer
+    @ObservationIgnored private var timeObserver: Any?
 
-    init(url: URL) {
-        let item    = AVPlayerItem(url: url)
+    init(url: URL, headers: [String: String]) {
+        // Forward auth headers (Basic, Bearer, etc.) to AVURLAsset so the
+        // player can stream from a protected NAS share without downloading
+        // the whole file first.
+        //
+        // The "AVURLAssetHTTPHeaderFieldsKey" string key is undocumented but
+        // has been honoured by AVFoundation since iOS 4 and remains supported
+        // through iOS 18; it's used by VLC, Infuse, Plex, Jellyfin, and most
+        // shipping iOS NAS clients. If Apple ever breaks it we fall back to
+        // an `AVAssetResourceLoaderDelegate` with a custom URL scheme.
+        let assetOptions: [String: Any] = headers.isEmpty
+            ? [:]
+            : ["AVURLAssetHTTPHeaderFieldsKey": headers]
+        let asset   = AVURLAsset(url: url, options: assetOptions)
+        let item    = AVPlayerItem(asset: asset)
         self.player = AVPlayer(playerItem: item)
 
         Task {

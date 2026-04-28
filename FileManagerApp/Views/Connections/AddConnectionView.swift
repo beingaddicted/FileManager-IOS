@@ -1,16 +1,21 @@
 import SwiftUI
 
 // MARK: - Add / Edit Connection View
+//
+// Used for editing existing connections and for the "Manual" / generic
+// preset entry point. The vendor-specific setup flow lives in
+// `NASPresetWizardView` and is what gets shown for new connections by
+// default.
 
 struct AddConnectionView: View {
     @Environment(\.dismiss) private var dismiss
-    @EnvironmentObject var appState: AppState
-    @EnvironmentObject var connVM: ConnectionViewModel
+    @Environment(AppState.self) private var appState
+    @Environment(ConnectionViewModel.self) private var connVM
 
     var existing: ServerConnection?
 
     @State private var displayName: String = ""
-    @State private var connectionType: ConnectionType = .ftp
+    @State private var connectionType: ConnectionType = .smb
     @State private var host: String = ""
     @State private var portText: String = ""
     @State private var username: String = ""
@@ -20,21 +25,17 @@ struct AddConnectionView: View {
     @State private var anonymousLogin: Bool = false
     @State private var showPassword: Bool = false
     @State private var validationError: String?
-    @State private var didAutoLaunchSSO = false
-    @State private var isAuthenticatingCloud = false
 
     private var isEditing: Bool { existing != nil }
-    private var isCloudType: Bool { [ConnectionType.googleDrive, .dropbox, .oneDrive].contains(connectionType) }
 
     init(existing: ServerConnection? = nil, preferredType: ConnectionType? = nil) {
         self.existing = existing
-        _connectionType = State(initialValue: preferredType ?? .ftp)
+        _connectionType = State(initialValue: preferredType ?? .smb)
     }
 
     var body: some View {
         NavigationStack {
             Form {
-                // MARK: - Type picker
                 Section {
                     Picker("Protocol", selection: $connectionType) {
                         ForEach(ConnectionType.allCases, id: \.self) { type in
@@ -48,36 +49,23 @@ struct AddConnectionView: View {
                     }
                     .onChange(of: connectionType) { new in
                         if portText.isEmpty {
-                            let defaultPort = new == .upnp ? 80 : new.defaultPort
-                            portText = "\(defaultPort)"
+                            portText = "\(new.defaultPort)"
                         }
                         usesSSL = new.usesSSL
-                        if [ConnectionType.googleDrive, .dropbox, .oneDrive].contains(new), !isEditing {
-                            if displayName.isBlank {
-                                displayName = new.rawValue
-                            }
-                            didAutoLaunchSSO = false
-                            launchCloudSSOIfNeeded(for: new)
-                        }
                     }
                 } header: {
                     Text("Connection Type")
                 }
 
-                // MARK: - Display name
-                Section {
+                Section("Display Name") {
                     TextField("My Server", text: $displayName)
-                } header: {
-                    Text(isCloudType ? "Account Name" : "Display Name")
                 }
 
-                // MARK: - Server details
-                if !isCloudType && (connectionType.requiresPath || connectionType == .upnp) {
-                    Section {
+                if connectionType.requiresPath || connectionType == .upnp {
+                    Section("Server") {
                         if connectionType != .upnp {
                             HStack {
-                                Text("Host")
-                                    .foregroundStyle(.secondary)
+                                Text("Host").foregroundStyle(.secondary)
                                 Spacer()
                                 TextField("192.168.1.100", text: $host)
                                     .multilineTextAlignment(.trailing)
@@ -85,19 +73,16 @@ struct AddConnectionView: View {
                                     .textInputAutocapitalization(.never)
                                     .keyboardType(.URL)
                             }
-
                             HStack {
-                                Text("Port")
-                                    .foregroundStyle(.secondary)
+                                Text("Port").foregroundStyle(.secondary)
                                 Spacer()
                                 TextField("\(connectionType.defaultPort)", text: $portText)
                                     .multilineTextAlignment(.trailing)
                                     .keyboardType(.numberPad)
                                     .frame(width: 80)
                             }
-
                             HStack {
-                                Text("Path")
+                                Text(connectionType == .smb ? "Share / Path" : "Path")
                                     .foregroundStyle(.secondary)
                                 Spacer()
                                 TextField("/", text: $basePath)
@@ -105,14 +90,12 @@ struct AddConnectionView: View {
                                     .autocorrectionDisabled()
                                     .textInputAutocapitalization(.never)
                             }
-
                             if connectionType == .ftp || connectionType == .webdav {
                                 Toggle("Use SSL / TLS", isOn: $usesSSL)
                             }
                         } else {
                             HStack {
-                                Text("Description URL / Host")
-                                    .foregroundStyle(.secondary)
+                                Text("Description URL / Host").foregroundStyle(.secondary)
                                 Spacer()
                                 TextField("Optional", text: $host)
                                     .multilineTextAlignment(.trailing)
@@ -121,8 +104,7 @@ struct AddConnectionView: View {
                                     .keyboardType(.URL)
                             }
                             HStack {
-                                Text("Port")
-                                    .foregroundStyle(.secondary)
+                                Text("Port").foregroundStyle(.secondary)
                                 Spacer()
                                 TextField("80", text: $portText)
                                     .multilineTextAlignment(.trailing)
@@ -133,59 +115,25 @@ struct AddConnectionView: View {
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                         }
-                    } header: {
-                        Text("Server")
                     }
                 }
 
-                // MARK: - Auth
-                if isCloudType {
-                    Section {
-                        Button {
-                            startCloudSSO(for: connectionType, autoSave: false)
-                        } label: {
-                            HStack {
-                                Image(systemName: connectionType.systemImage)
-                                    .foregroundStyle(connectionType.tintColor)
-                                Text(isAuthenticatingCloud ? "Signing in…" : "Continue with \(connectionType.rawValue)")
-                                Spacer()
-                                if isAuthenticatingCloud {
-                                    ProgressView()
-                                } else {
-                                    Image(systemName: "arrow.up.right.square")
-                                        .foregroundStyle(.secondary)
-                                }
-                            }
-                        }
-                        .disabled(isAuthenticatingCloud)
-                        SecureField("Access Token (optional)", text: $password)
-                            .textInputAutocapitalization(.never)
-                            .autocorrectionDisabled()
-                    } header: {
-                        Text("Sign In")
-                    } footer: {
-                        Text("SSO opens in browser. If your provider returns an API token, paste it here.")
-                    }
-                } else if connectionType.usesAuth && connectionType != .upnp {
-                    Section {
+                if connectionType.usesAuth && connectionType != .upnp {
+                    Section("Authentication") {
                         if connectionType == .ftp {
                             Toggle("Anonymous Login", isOn: $anonymousLogin)
                         }
-
                         if !anonymousLogin {
                             HStack {
-                                Text("Username")
-                                    .foregroundStyle(.secondary)
+                                Text("Username").foregroundStyle(.secondary)
                                 Spacer()
                                 TextField("username", text: $username)
                                     .multilineTextAlignment(.trailing)
                                     .autocorrectionDisabled()
                                     .textInputAutocapitalization(.never)
                             }
-
                             HStack {
-                                Text("Password")
-                                    .foregroundStyle(.secondary)
+                                Text("Password").foregroundStyle(.secondary)
                                 Spacer()
                                 if showPassword {
                                     TextField("••••••••", text: $password)
@@ -204,13 +152,9 @@ struct AddConnectionView: View {
                                 }
                             }
                         }
-                    } header: {
-                        Text("Authentication")
                     }
-
                 }
 
-                // MARK: - Validation error
                 if let err = validationError {
                     Section {
                         Label(err, systemImage: "exclamationmark.triangle.fill")
@@ -226,24 +170,16 @@ struct AddConnectionView: View {
                     Button("Cancel") { dismiss() }
                 }
                 ToolbarItem(placement: .confirmationAction) {
-                    Button("Save") { save() }
-                        .bold()
+                    Button("Save") { save() }.bold()
                 }
             }
             .onAppear { populate() }
         }
     }
 
-    // MARK: - Populate (edit mode)
-
     private func populate() {
         guard let c = existing else {
-            let defaultPort = connectionType == .upnp ? 80 : connectionType.defaultPort
-            portText = "\(defaultPort)"
-            if isCloudType {
-                if displayName.isBlank { displayName = connectionType.rawValue }
-                launchCloudSSOIfNeeded(for: connectionType)
-            }
+            portText = "\(connectionType.defaultPort)"
             return
         }
         displayName    = c.displayName
@@ -256,25 +192,13 @@ struct AddConnectionView: View {
         password       = KeychainHelper.shared.password(for: c)
     }
 
-    // MARK: - Save
-
     private func save() {
         validationError = nil
-
-        // Validate
-        if displayName.isBlank {
-            displayName = connectionType.rawValue
-        }
-        if isCloudType && password.isBlank &&
-            (KeychainHelper.shared.token(for: connectionType.providerType) ?? "").isEmpty {
-            validationError = "Sign in with \(connectionType.rawValue) first."
-            return
-        }
-        if connectionType != .upnp && !connectionType.isCloud && host.isBlank {
+        if displayName.isBlank { displayName = connectionType.rawValue }
+        if connectionType != .upnp && host.isBlank {
             validationError = "Host is required."; return
         }
-        let defaultPort = connectionType == .upnp ? 80 : connectionType.defaultPort
-        let port = Int(portText) ?? defaultPort
+        let port = Int(portText) ?? connectionType.defaultPort
 
         var conn = existing ?? ServerConnection(
             displayName:  displayName,
@@ -293,13 +217,7 @@ struct AddConnectionView: View {
         conn.usesSSL        = usesSSL
         conn.anonymousLogin = anonymousLogin
 
-        if isCloudType {
-            if !password.isBlank {
-                KeychainHelper.shared.saveToken(password, provider: connectionType.providerType)
-            }
-        } else {
-            KeychainHelper.shared.savePassword(password, for: conn)
-        }
+        KeychainHelper.shared.savePassword(password, for: conn)
 
         if isEditing {
             appState.updateConnection(conn)
@@ -307,42 +225,5 @@ struct AddConnectionView: View {
             appState.addConnection(conn)
         }
         dismiss()
-    }
-
-    // MARK: - OAuth
-
-    private func launchCloudSSOIfNeeded(for type: ConnectionType) {
-        guard !didAutoLaunchSSO else { return }
-        didAutoLaunchSSO = true
-        startCloudSSO(for: type, autoSave: !isEditing)
-    }
-
-    private func startCloudSSO(for type: ConnectionType, autoSave: Bool) {
-        guard !isAuthenticatingCloud else { return }
-        isAuthenticatingCloud = true
-        validationError = nil
-
-        Task {
-            defer { isAuthenticatingCloud = false }
-            if let token = await connVM.authenticateCloud(type) {
-                password = token
-                if autoSave {
-                    save()
-                }
-            } else {
-                validationError = connVM.error ?? "Sign in failed."
-            }
-        }
-    }
-}
-
-// MARK: - Extensions
-
-extension ConnectionType {
-    var isCloud: Bool {
-        switch self {
-        case .googleDrive, .dropbox, .oneDrive: return true
-        default: return false
-        }
     }
 }

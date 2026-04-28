@@ -79,21 +79,24 @@ struct FileRowView: View {
 
     @ViewBuilder
     private var iconView: some View {
-        if let img = thumbnail {
-            Image(uiImage: img)
-                .resizable()
-                .aspectRatio(contentMode: .fill)
-                .frame(width: 44, height: 44)
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        } else {
-            ZStack {
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(item.accentColor.opacity(0.12))
-                Image(systemName: item.systemImage)
-                    .font(.system(size: 22))
-                    .foregroundStyle(item.accentColor)
+        ZStack {
+            // Placeholder under everything so the row never has empty space.
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(item.accentColor.opacity(0.12))
+            Image(systemName: item.systemImage)
+                .font(.system(size: 22))
+                .foregroundStyle(item.accentColor)
+
+            if let img = thumbnail {
+                Image(uiImage: img)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(width: 44, height: 44)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .transition(.opacity.animation(.easeOut(duration: 0.18)))
             }
         }
+        .animation(.easeOut(duration: 0.18), value: thumbnail != nil)
     }
 }
 
