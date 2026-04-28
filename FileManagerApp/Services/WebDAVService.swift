@@ -11,7 +11,14 @@ final class WebDAVService: FileProvider {
 
     private let connection: ServerConnection
     private var password: String { KeychainHelper.shared.password(for: connection) }
-    private let session: URLSession
+    /// Single shared URLSession across every `WebDAVService` instance. Each
+    /// one used to spin up its own session, which meant five saved WebDAV
+    /// servers got five independent connection pools and five sets of
+    /// HTTP/2 streams. URLSession internally pools connections per
+    /// `(scheme, host, port)`, so giving them all the same session lets the
+    /// OS share TCP connections and TLS sessions across services that hit
+    /// the same NAS.
+    private let session: URLSession = WebDAVSharedSession.shared
     private let baseURL: URL
     private let rootPath: String
 
@@ -20,13 +27,6 @@ final class WebDAVService: FileProvider {
         let scheme   = connection.usesSSL ? "https" : "http"
         let port     = connection.port
         self.baseURL = URL(string: "\(scheme)://\(connection.host):\(port)") ?? URL(string: "http://localhost")!
-
-        let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest  = 30
-        config.timeoutIntervalForResource = 3600
-        config.waitsForConnectivity       = true
-        config.httpMaximumConnectionsPerHost = 6
-        self.session = URLSession(configuration: config)
 
         let normalized = connection.basePath.trimmingCharacters(in: .whitespacesAndNewlines)
         if normalized.isEmpty || normalized == "/" {
@@ -230,6 +230,31 @@ final class WebDAVService: FileProvider {
     private func parseMultiStatus(xml: Data, basePath: String) throws -> [FileItem] {
         try DAVMultiStatusParser(data: xml, basePath: basePath, connectionId: connection.id).parse()
     }
+}
+
+// MARK: - Shared session
+//
+// Process-wide foreground URLSession used by every WebDAVService. URLSession
+// pools TCP / TLS connections per (scheme, host, port) internally — but only
+// across requests issued through the *same* session. Sharing one session
+// across all services lets HTTP/2 connection reuse work as designed when
+// one user has multiple WebDAV servers behind the same hostname (Synology
+// + Synology Photos + Synology Drive on one box, for example).
+//
+// Background transfers go through `BackgroundWebDAVSession`, which has its
+// own `.background(withIdentifier:)` configuration.
+
+private enum WebDAVSharedSession {
+    static let shared: URLSession = {
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest      = 30
+        config.timeoutIntervalForResource     = 3600
+        config.waitsForConnectivity           = true
+        config.httpMaximumConnectionsPerHost  = 6
+        config.requestCachePolicy             = .reloadIgnoringLocalCacheData
+        // WebDAV servers vary on cookie use; keep the default cookie store.
+        return URLSession(configuration: config)
+    }()
 }
 
 // MARK: - DAV XML Parser

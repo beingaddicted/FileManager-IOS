@@ -36,6 +36,11 @@ final class ThumbnailService {
     /// Coalesces concurrent requests for the same key so we never generate
     /// the same thumbnail twice in parallel (common in long grids).
     private var inFlight: [String: Task<UIImage?, Never>] = [:]
+    /// Caps how many heavyweight thumbnail generators run at once. iOS
+    /// throttles us above ~6 concurrent CGImageSource/AVAssetImageGenerator
+    /// workers anyway; pinning the cap on our side keeps a 5,000-photo grid
+    /// from scheduling 5,000 cooperative-tasks that all want the same CPU.
+    private let limiter = ConcurrencyLimiter(maxConcurrency: 4)
 
     // MARK: - Public
 
@@ -59,10 +64,19 @@ final class ThumbnailService {
 
         let task = Task<UIImage?, Never> { [weak self] in
             guard let self else { return nil }
+            // Wait for a generator slot. If the originating cell scrolls off
+            // before we get one, the awaiting cell's `.task` is cancelled,
+            // its continuation throws, and `Task.isCancelled` becomes true
+            // here so we bail without doing the expensive work.
+            await self.limiter.acquire()
+            defer { Task { await self.limiter.release() } }
+
+            if Task.isCancelled {
+                self.inFlight.removeValue(forKey: key)
+                return nil
+            }
             let generated = await self.generateThumbnail(item: item, size: size)
-            if let image = generated {
-                // Store to both layers; Kingfisher writes the disk file in
-                // the background so we don't await it.
+            if let image = generated, !Task.isCancelled {
                 self.cache.store(image, forKey: key, toDisk: true)
             }
             self.inFlight.removeValue(forKey: key)
@@ -258,5 +272,40 @@ final class ThumbnailService {
         let mtime = Int(item.modifiedDate.timeIntervalSince1970)
         let conn  = item.connectionId?.uuidString ?? "local"
         return "\(item.providerType.rawValue)|\(conn)|\(item.path)|\(mtime)|\(Int(size.width))x\(Int(size.height))"
+    }
+}
+
+// MARK: - Concurrency limiter
+//
+// Swift Concurrency doesn't ship a semaphore primitive (DispatchSemaphore is
+// not safe with structured concurrency — it can deadlock the cooperative
+// thread pool). This actor models the simplest fair counting semaphore:
+// permits go to the next waiter when released.
+
+actor ConcurrencyLimiter {
+    private var available: Int
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    init(maxConcurrency: Int) {
+        self.available = max(1, maxConcurrency)
+    }
+
+    func acquire() async {
+        if available > 0 {
+            available -= 1
+            return
+        }
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            waiters.append(cont)
+        }
+    }
+
+    func release() {
+        if let next = waiters.first {
+            waiters.removeFirst()
+            next.resume()
+        } else {
+            available += 1
+        }
     }
 }
