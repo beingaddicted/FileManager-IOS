@@ -1,27 +1,22 @@
 import Foundation
+import SwiftUI
 
 // MARK: - Connection Type
 
 enum ConnectionType: String, Codable, CaseIterable {
-    case ftp        = "FTP"
-    case sftp       = "SFTP"
-    case smb        = "SMB"
-    case webdav     = "WebDAV"
-    case upnp       = "UPnP / DLNA"
-    case googleDrive = "Google Drive"
-    case dropbox    = "Dropbox"
-    case oneDrive   = "OneDrive"
+    case smb    = "SMB"
+    case sftp   = "SFTP"
+    case webdav = "WebDAV"
+    case ftp    = "FTP"
+    case upnp   = "UPnP / DLNA"
 
     var defaultPort: Int {
         switch self {
-        case .ftp:          return 21
-        case .sftp:         return 22
-        case .smb:          return 445
-        case .webdav:       return 80
-        case .upnp:         return 0
-        case .googleDrive,
-             .dropbox,
-             .oneDrive:     return 443
+        case .smb:    return 445
+        case .sftp:   return 22
+        case .webdav: return 80
+        case .ftp:    return 21
+        case .upnp:   return 0
         }
     }
 
@@ -33,10 +28,7 @@ enum ConnectionType: String, Codable, CaseIterable {
     }
 
     var usesSSL: Bool {
-        switch self {
-        case .sftp, .googleDrive, .dropbox, .oneDrive: return true
-        default: return false
-        }
+        self == .sftp
     }
 
     var requiresPath: Bool {
@@ -48,24 +40,17 @@ enum ConnectionType: String, Codable, CaseIterable {
 
     var providerType: ProviderType {
         switch self {
-        case .ftp:          return .ftp
-        case .sftp:         return .sftp
-        case .smb:          return .smb
-        case .webdav:       return .webdav
-        case .upnp:         return .upnp
-        case .googleDrive:  return .googleDrive
-        case .dropbox:      return .dropbox
-        case .oneDrive:     return .oneDrive
+        case .ftp:    return .ftp
+        case .sftp:   return .sftp
+        case .smb:    return .smb
+        case .webdav: return .webdav
+        case .upnp:   return .upnp
         }
     }
 
     var systemImage: String { providerType.systemImage }
     var tintColor: Color   { providerType.tintColor }
 }
-
-// MARK: - Import SwiftUI for Color
-
-import SwiftUI
 
 // MARK: - Server Connection
 
@@ -78,10 +63,12 @@ struct ServerConnection: Identifiable, Codable, Hashable {
     var username: String
     var basePath: String = "/"
     var usesSSL: Bool = false
-    var passiveMode: Bool = true      // FTP
+    var passiveMode: Bool = true   // FTP
     var anonymousLogin: Bool = false
     var lastConnected: Date?
     var isBookmarked: Bool = false
+    /// Optional vendor preset that produced this connection (Synology, TrueNAS, etc.).
+    var presetId: String?
 
     var keychainKey: String { "fm_pwd_\(id.uuidString)" }
 
@@ -91,8 +78,6 @@ struct ServerConnection: Identifiable, Codable, Hashable {
 
     var subtitle: String {
         switch type {
-        case .googleDrive, .dropbox, .oneDrive:
-            return username.isEmpty ? type.rawValue : username
         case .upnp:
             return host.isEmpty ? "Auto-discover on network" : host
         default:
@@ -106,7 +91,8 @@ struct ServerConnection: Identifiable, Codable, Hashable {
         host: String = "",
         port: Int? = nil,
         username: String = "",
-        basePath: String = "/"
+        basePath: String = "/",
+        presetId: String? = nil
     ) {
         self.displayName = displayName
         self.type = type
@@ -115,6 +101,7 @@ struct ServerConnection: Identifiable, Codable, Hashable {
         self.username = username
         self.basePath = basePath
         self.usesSSL = type.usesSSL
+        self.presetId = presetId
     }
 }
 
@@ -125,7 +112,7 @@ struct UPnPDevice: Identifiable, Hashable {
     var friendlyName: String
     var modelName: String
     var manufacturer: String
-    var location: String     // Base URL
+    var location: String
     var services: [UPnPService]
 
     struct UPnPService: Hashable {

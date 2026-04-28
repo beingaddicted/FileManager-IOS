@@ -1,6 +1,12 @@
 import Foundation
 
-// MARK: - FTP Service (URLSession / CFStream based)
+// MARK: - FTP Service
+//
+// Plain FTP (RFC 959) is deprecated by Apple and largely dying in real
+// deployments. iOS 16+ still routes `ftp://` URLs through URLSession but with
+// limited semantics: reliable for read + simple list, no MKDIR / DELE / RNFR
+// over a vanilla data connection. We expose what's safe and surface
+// `unsupportedOperation` for the rest with a hint to use SFTP instead.
 
 final class FTPService: FileProvider {
     let providerType: ProviderType = .ftp
@@ -8,49 +14,42 @@ final class FTPService: FileProvider {
 
     private let connection: ServerConnection
     private var password: String { KeychainHelper.shared.password(for: connection) }
-    private var baseURL: URL
+    private let baseURL: URL
     private let rootPath: String
     private let session: URLSession
 
     init(connection: ServerConnection) {
         self.connection = connection
-        let scheme = connection.usesSSL ? "ftps" : "ftp"
+        let scheme   = connection.usesSSL ? "ftps" : "ftp"
         self.baseURL = URL(string: "\(scheme)://\(connection.host):\(connection.port)")
             ?? URL(string: "ftp://localhost")!
-        let normalizedBase = connection.basePath.trimmingCharacters(in: .whitespacesAndNewlines)
-        if normalizedBase.isEmpty || normalizedBase == "/" {
+
+        let normalized = connection.basePath.trimmingCharacters(in: .whitespacesAndNewlines)
+        if normalized.isEmpty || normalized == "/" {
             self.rootPath = "/"
         } else {
-            self.rootPath = normalizedBase.hasPrefix("/") ? normalizedBase : "/\(normalizedBase)"
+            self.rootPath = normalized.hasPrefix("/") ? normalized : "/\(normalized)"
         }
+
         let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 30
-        config.timeoutIntervalForResource = 120
-        config.waitsForConnectivity = true
+        config.timeoutIntervalForRequest  = 30
+        config.timeoutIntervalForResource = 3600
+        config.waitsForConnectivity       = true
         self.session = URLSession(configuration: config)
     }
 
-    // MARK: - Connect / Disconnect
-
     func connect() async throws {
-        // Validate credentials with a LIST of basePath
-        _ = try await performList(path: connection.basePath)
+        _ = try await listingString(at: connection.basePath)
         isConnected = true
     }
 
-    func disconnect() {
-        isConnected = false
-    }
-
-    // MARK: - List
+    func disconnect() { isConnected = false }
 
     func listDirectory(at path: String) async throws -> [FileItem] {
         let resolved = resolvePath(path)
-        let lines = try await performList(path: resolved)
-        return parseFTPListing(lines, basePath: resolved)
+        let listing  = try await listingString(at: resolved)
+        return parseListing(listing, basePath: resolved)
     }
-
-    // MARK: - Info
 
     func getInfo(at path: String) async throws -> FileItem {
         let parent = (path as NSString).deletingLastPathComponent
@@ -62,52 +61,58 @@ final class FTPService: FileProvider {
         return item
     }
 
-    // MARK: - Download
-
-    func download(from path: String, progress: ProgressHandler?) async throws -> Data {
-        let url = ftpURL(for: resolvePath(path))
-        let request = authorisedRequest(url: url)
-        let (data, response) = try await session.data(for: request)
-        try validateResponse(response)
-        progress?(1.0)
-        return data
+    func downloadToTemp(from path: String, progress: ProgressHandler?) async throws -> URL {
+        let req = authorisedRequest(url: ftpURL(for: resolvePath(path)))
+        return try await session.streamDownload(for: req, progress: progress)
     }
-
-    // MARK: - Upload
 
     func upload(_ data: Data, to path: String, progress: ProgressHandler?) async throws {
-        let url = ftpURL(for: resolvePath(path))
-        var request = authorisedRequest(url: url)
-        request.httpMethod = "PUT"
-        request.httpBody   = data
-        let (_, response)  = try await session.data(for: request)
-        try validateResponse(response)
+        var req = authorisedRequest(url: ftpURL(for: resolvePath(path)))
+        req.httpMethod = "PUT"
+        req.httpBody   = data
+        let (_, response) = try await session.data(for: req)
+        try validate(response)
         progress?(1.0)
     }
 
-    // MARK: - Mutating ops (via FTP commands over URLSession)
+    // MARK: - Mutating ops (unsupported on plain FTP via URLSession)
 
     func delete(at path: String) async throws {
-        throw FileProviderError.unsupportedOperation
+        throw FileProviderError.networkError("Delete not supported over FTP. Use SFTP for full management.")
     }
 
     func createDirectory(at path: String) async throws {
-        throw FileProviderError.unsupportedOperation
+        throw FileProviderError.networkError("Create folder not supported over FTP. Use SFTP for full management.")
     }
 
     func rename(at path: String, to newName: String) async throws {
-        throw FileProviderError.unsupportedOperation
+        throw FileProviderError.networkError("Rename not supported over FTP. Use SFTP for full management.")
     }
 
     func move(from src: String, to dst: String) async throws {
-        throw FileProviderError.unsupportedOperation
+        throw FileProviderError.networkError("Move not supported over FTP. Use SFTP for full management.")
     }
 
-    // MARK: - Private helpers
+    // MARK: - Streaming URL (AVPlayer can play ftp:// directly)
+
+    func streamingURL(for path: String) -> StreamingTarget? {
+        StreamingTarget(url: ftpURL(for: resolvePath(path)), headers: [:])
+    }
+
+    // MARK: - Private
 
     private func ftpURL(for path: String) -> URL {
-        let clean = path.hasPrefix("/") ? String(path.dropFirst()) : path
-        return baseURL.appendingPathComponent(clean)
+        var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
+        components?.user     = connection.anonymousLogin ? nil : connection.username
+        components?.password = connection.anonymousLogin ? nil : password
+        components?.path     = path.hasPrefix("/") ? path : "/\(path)"
+        return components?.url ?? baseURL
+    }
+
+    private func authorisedRequest(url: URL) -> URLRequest {
+        var req = URLRequest(url: url)
+        req.cachePolicy = .reloadIgnoringLocalCacheData
+        return req
     }
 
     private func resolvePath(_ path: String) -> String {
@@ -125,41 +130,33 @@ final class FTPService: FileProvider {
         return rootPath + "/" + clean
     }
 
-    private func authorisedRequest(url: URL) -> URLRequest {
-        var req = URLRequest(url: url)
-        if !connection.anonymousLogin {
-            let creds = "\(connection.username):\(password)"
-            if let encoded = creds.data(using: .utf8)?.base64EncodedString() {
-                req.setValue("Basic \(encoded)", forHTTPHeaderField: "Authorization")
-            }
-        }
-        return req
-    }
-
-    private func performList(path: String) async throws -> String {
-        let url  = ftpURL(for: path.hasSuffix("/") ? path : path + "/")
-        let req  = authorisedRequest(url: url)
+    private func listingString(at path: String) async throws -> String {
+        // Trailing slash signals directory mode to Apple's FTP loader.
+        let url = ftpURL(for: path.hasSuffix("/") ? path : path + "/")
+        let req = authorisedRequest(url: url)
         let (data, response) = try await session.data(for: req)
-        try validateResponse(response)
+        try validate(response)
         return String(data: data, encoding: .utf8) ?? ""
     }
 
-    private func validateResponse(_ response: URLResponse) throws {
+    private func validate(_ response: URLResponse) throws {
         if let http = response as? HTTPURLResponse,
            !(200...299).contains(http.statusCode) {
             if http.statusCode == 401 || http.statusCode == 530 {
                 throw FileProviderError.authenticationFailed("Invalid credentials")
             }
-            throw FileProviderError.serverError(http.statusCode, HTTPURLResponse.localizedString(forStatusCode: http.statusCode))
+            throw FileProviderError.serverError(
+                http.statusCode,
+                HTTPURLResponse.localizedString(forStatusCode: http.statusCode)
+            )
         }
     }
 
-    // MARK: - Unix listing parser (MLSD / LIST)
+    // MARK: - Listing parser (Unix LIST + MLSD)
 
-    private func parseFTPListing(_ listing: String, basePath: String) -> [FileItem] {
+    private func parseListing(_ listing: String, basePath: String) -> [FileItem] {
         var items: [FileItem] = []
-        let lines = listing.components(separatedBy: "\n").filter { !$0.isEmpty }
-        for line in lines {
+        for line in listing.components(separatedBy: "\n") where !line.isEmpty {
             if let item = parseUnixLine(line, basePath: basePath) {
                 items.append(item)
             }
@@ -182,22 +179,21 @@ final class FTPService: FileProvider {
         let url  = URL(fileURLWithPath: path)
 
         return FileItem(
-            id: path,
-            name: name,
-            path: path,
-            size: isDir ? 0 : size,
+            id:           path,
+            name:         name,
+            path:         path,
+            size:         isDir ? 0 : size,
             modifiedDate: parseDate(parts: parts),
-            isDirectory: isDir,
-            isHidden: name.hasPrefix("."),
-            isSymlink: isLink,
-            itemType: isDir ? .folder : FileTypeHelper.detectType(for: url),
+            isDirectory:  isDir,
+            isHidden:     name.hasPrefix("."),
+            isSymlink:    isLink,
+            itemType:     isDir ? .folder : FileTypeHelper.detectType(for: url),
             providerType: .ftp,
             connectionId: connection.id
         )
     }
 
     private func parseMLSDLine(_ line: String, basePath: String) -> FileItem? {
-        // Format: Type=file;Size=1234;Modify=20230101120000; filename
         var facts: [String: String] = [:]
         let parts = line.components(separatedBy: "; ")
         guard parts.count >= 2 else { return nil }
@@ -216,15 +212,15 @@ final class FTPService: FileProvider {
         let url   = URL(fileURLWithPath: path)
 
         return FileItem(
-            id: path,
-            name: name,
-            path: path,
-            size: isDir ? 0 : size,
+            id:           path,
+            name:         name,
+            path:         path,
+            size:         isDir ? 0 : size,
             modifiedDate: parseMLSDDate(facts["modify"]),
-            isDirectory: isDir,
-            isHidden: name.hasPrefix("."),
-            isSymlink: false,
-            itemType: isDir ? .folder : FileTypeHelper.detectType(for: url),
+            isDirectory:  isDir,
+            isHidden:     name.hasPrefix("."),
+            isSymlink:    false,
+            itemType:     isDir ? .folder : FileTypeHelper.detectType(for: url),
             providerType: .ftp,
             connectionId: connection.id
         )
@@ -249,112 +245,4 @@ final class FTPService: FileProvider {
         formatter.dateFormat = "yyyyMMddHHmmss"
         return formatter.date(from: str) ?? Date()
     }
-}
-
-// MARK: - SFTP Service (via NMSSH)
-
-final class SFTPService: FileProvider {
-    let providerType: ProviderType = .sftp
-    private(set) var isConnected: Bool = false
-
-    private let connection: ServerConnection
-    private var password: String { KeychainHelper.shared.password(for: connection) }
-
-    // NMSSH session – imported via CocoaPods
-    // private var session: NMSSHSession?
-    // private var sftp:    NMSFTP?
-
-    init(connection: ServerConnection) {
-        self.connection = connection
-    }
-
-    func connect() async throws {
-        // NMSSH integration:
-        // session = NMSSHSession(host: connection.host, port: connection.port, andUsername: connection.username)
-        // session?.connect()
-        // session?.authenticate(byPassword: password)
-        // sftp = NMSFTP.connect(with: session!)
-        // isConnected = sftp?.isConnected ?? false
-        //
-        // Stub until NMSSH pod is linked:
-        throw FileProviderError.networkError("SFTP requires NMSSH pod. Run `pod install` first.")
-    }
-
-    func disconnect() {
-        // sftp?.disconnect()
-        // session?.disconnect()
-        isConnected = false
-    }
-
-    func listDirectory(at path: String) async throws -> [FileItem] {
-        guard isConnected else { throw FileProviderError.notConnected }
-        // let entries = sftp?.contentsOfDirectory(atPath: path) ?? []
-        // return entries.compactMap { makeItem($0, parent: path) }
-        return []
-    }
-
-    func getInfo(at path: String) async throws -> FileItem {
-        throw FileProviderError.unsupportedOperation
-    }
-
-    func download(from path: String, progress: ProgressHandler?) async throws -> Data {
-        guard isConnected else { throw FileProviderError.notConnected }
-        // return sftp?.contents(atPath: path) ?? Data()
-        throw FileProviderError.unsupportedOperation
-    }
-
-    func upload(_ data: Data, to path: String, progress: ProgressHandler?) async throws {
-        guard isConnected else { throw FileProviderError.notConnected }
-        // sftp?.writeContents(data, toFileAtPath: path)
-    }
-
-    func delete(at path: String) async throws {
-        // sftp?.removeFile(atPath: path)
-    }
-
-    func createDirectory(at path: String) async throws {
-        // sftp?.createDirectory(atPath: path)
-    }
-
-    func rename(at path: String, to newName: String) async throws {
-        let parent  = (path as NSString).deletingLastPathComponent
-        let newPath = (parent as NSString).appendingPathComponent(newName)
-        _ = newPath
-        // sftp?.moveItem(atPath: path, toPath: newPath)
-    }
-
-    func move(from src: String, to dst: String) async throws {
-        // sftp?.moveItem(atPath: src, toPath: dst)
-    }
-}
-
-// MARK: - SMB Service
-
-final class SMBService: FileProvider {
-    let providerType: ProviderType = .smb
-    private(set) var isConnected: Bool = false
-
-    private let connection: ServerConnection
-
-    init(connection: ServerConnection) {
-        self.connection = connection
-    }
-
-    // SMB/CIFS on iOS requires a third-party library such as AMSMB2.
-    // https://github.com/amosavian/AMSMB2
-
-    func connect() async throws {
-        throw FileProviderError.networkError("SMB support requires AMSMB2 pod. Run `pod install`.")
-    }
-
-    func disconnect() { isConnected = false }
-
-    func listDirectory(at path: String) async throws -> [FileItem] { [] }
-    func getInfo(at path: String) async throws -> FileItem { throw FileProviderError.unsupportedOperation }
-    func download(from path: String, progress: ProgressHandler?) async throws -> Data { Data() }
-    func upload(_ data: Data, to path: String, progress: ProgressHandler?) async throws {}
-    func delete(at path: String) async throws {}
-    func createDirectory(at path: String) async throws {}
-    func rename(at path: String, to newName: String) async throws {}
-    func move(from src: String, to dst: String) async throws {}
 }

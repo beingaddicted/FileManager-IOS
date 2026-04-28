@@ -60,18 +60,4 @@ final class KeychainHelper {
     func savePassword(_ password: String, for connection: ServerConnection) {
         save(password, key: connection.keychainKey)
     }
-
-    // Token storage (OAuth)
-
-    func saveToken(_ token: String, provider: ProviderType) {
-        save(token, key: "fm_token_\(provider.rawValue)")
-    }
-
-    func token(for provider: ProviderType) -> String? {
-        load(key: "fm_token_\(provider.rawValue)")
-    }
-
-    func deleteToken(for provider: ProviderType) {
-        delete(key: "fm_token_\(provider.rawValue)")
-    }
 }

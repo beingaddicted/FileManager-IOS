@@ -760,19 +760,16 @@ final class ICloudService: FileProvider {
         return item
     }
 
-    func download(from path: String, progress: ProgressHandler?) async throws -> Data {
+    func downloadToTemp(from path: String, progress: ProgressHandler?) async throws -> URL {
         let url = URL(fileURLWithPath: path)
-        // Trigger iCloud download if needed
         try? FileManager.default.startDownloadingUbiquitousItem(at: url)
-        // Wait briefly for download
-        var attempts = 0
-        while attempts < 30 {
-            if let data = try? Data(contentsOf: url) {
+        // Wait briefly for the iCloud cache to land the file locally.
+        for _ in 0..<60 {
+            if FileManager.default.isReadableFile(atPath: url.path) {
                 progress?(1.0)
-                return data
+                return url
             }
             try await Task.sleep(nanoseconds: 500_000_000)
-            attempts += 1
         }
         throw FileProviderError.transferFailed("iCloud download timed out")
     }

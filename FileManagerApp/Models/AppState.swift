@@ -205,29 +205,29 @@ struct LocalPinnedLocation: Codable, Hashable, Identifiable {
 // MARK: - App Tabs
 
 enum AppTab: String, CaseIterable {
-    case local   = "local"
-    case network = "network"
-    case cloud   = "cloud"
-    case recents = "recents"
-    case settings = "settings"
+    case local     = "local"
+    case network   = "network"
+    case transfers = "transfers"
+    case recents   = "recents"
+    case settings  = "settings"
 
     var title: String {
         switch self {
-        case .local:   return "Local"
-        case .network: return "Network"
-        case .cloud:   return "Cloud"
-        case .recents: return "Recents"
-        case .settings:return "Settings"
+        case .local:     return "Files"
+        case .network:   return "Servers"
+        case .transfers: return "Transfers"
+        case .recents:   return "Recents"
+        case .settings:  return "Settings"
         }
     }
 
     var systemImage: String {
         switch self {
-        case .local:   return "internaldrive.fill"
-        case .network: return "network"
-        case .cloud:   return "cloud.fill"
-        case .recents: return "clock.fill"
-        case .settings:return "gearshape.fill"
+        case .local:     return "internaldrive.fill"
+        case .network:   return "externaldrive.connected.to.line.below.fill"
+        case .transfers: return "arrow.up.arrow.down.circle.fill"
+        case .recents:   return "clock.fill"
+        case .settings:  return "gearshape.fill"
         }
     }
 }

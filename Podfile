@@ -5,23 +5,24 @@ inhibit_all_warnings!
 target 'FileManagerApp' do
 
   # ── Networking ─────────────────────────────────────────────────────────────
-  pod 'Alamofire', '~> 5.8'           # HTTP networking layer
+  pod 'Alamofire', '~> 5.8'
 
   # ── Keychain ───────────────────────────────────────────────────────────────
-  pod 'KeychainAccess', '~> 4.2'      # Secure credential storage
+  pod 'KeychainAccess', '~> 4.2'
 
-  # ── SFTP (SSH File Transfer Protocol) ─────────────────────────────────────
-  pod 'NMSSH', '~> 2.3'              # libssh2-based SSH/SFTP
+  # ── SFTP (libssh2 wrapper, BSD licensed) ───────────────────────────────────
+  # https://github.com/NMSSH/NMSSH (~1.6k stars)
+  pod 'NMSSH', '~> 2.3'
 
-  # ── SMB (Windows file shares) ─────────────────────────────────────────────
-  # Uncomment when targeting SMB support:
-  # pod 'AMSMB2', '~> 3.0'           # SMB2/3 client
+  # ── SMB / CIFS (libsmb2 wrapper, LGPL) ─────────────────────────────────────
+  # https://github.com/amosavian/AMSMB2 (~700 stars, the de-facto Swift SMB client)
+  pod 'AMSMB2', '~> 3.0'
 
-  # ── Image loading & caching ────────────────────────────────────────────────
-  pod 'Kingfisher', '~> 7.10'        # Async image loading / disk cache
+  # ── Image loading & disk caching ───────────────────────────────────────────
+  pod 'Kingfisher', '~> 7.10'
 
-  # ── Text syntax highlighting (open source) ────────────────────────────────
-  pod 'Highlightr', '~> 2.1'         # Highlight.js-powered syntax highlighting
+  # ── Text syntax highlighting ───────────────────────────────────────────────
+  pod 'Highlightr', '~> 2.1'
 
 end
 

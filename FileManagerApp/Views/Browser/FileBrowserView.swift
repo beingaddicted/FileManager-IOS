@@ -604,6 +604,23 @@ struct FileBrowserView: View {
             Label("Share / Export", systemImage: "square.and.arrow.up")
         }
 
+        if vm.providerType.isNetwork {
+            Button {
+                vm.enqueueBackgroundDownload(item)
+            } label: {
+                Label("Download to Device", systemImage: "arrow.down.circle")
+            }
+
+            Button {
+                vm.togglePin(item)
+            } label: {
+                Label(
+                    vm.isPinned(item) ? "Unpin (Online Only)" : "Pin Offline",
+                    systemImage: vm.isPinned(item) ? "pin.slash" : "pin.fill"
+                )
+            }
+        }
+
         Divider()
 
         Button {

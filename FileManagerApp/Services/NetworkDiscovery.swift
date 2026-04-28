@@ -316,15 +316,20 @@ final class UPnPService: FileProvider {
         throw FileProviderError.unsupportedOperation
     }
 
-    func download(from path: String, progress: ProgressHandler?) async throws -> Data {
+    func downloadToTemp(from path: String, progress: ProgressHandler?) async throws -> URL {
         guard let url = URL(string: path) else { throw FileProviderError.invalidPath(path) }
-        let (data, _) = try await URLSession.shared.data(from: url)
-        progress?(1.0)
-        return data
+        let req = URLRequest(url: url)
+        return try await URLSession.shared.streamDownload(for: req, progress: progress)
     }
 
     func upload(_ data: Data, to path: String, progress: ProgressHandler?) async throws {
         throw FileProviderError.unsupportedOperation
+    }
+
+    func streamingURL(for path: String) -> StreamingTarget? {
+        // UPnP DIDL-Lite already returns a direct HTTP URL in the path.
+        guard let url = URL(string: path) else { return nil }
+        return StreamingTarget(url: url, headers: [:])
     }
 
     func delete(at path: String) async throws {

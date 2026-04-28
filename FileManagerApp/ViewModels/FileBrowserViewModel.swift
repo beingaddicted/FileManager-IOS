@@ -219,10 +219,6 @@ final class FileBrowserViewModel: ObservableObject {
             error = "Open a location before uploading files."
             return
         }
-        guard let data = try? Data(contentsOf: url) else {
-            error = "Failed to read file"
-            return
-        }
         let name = url.lastPathComponent
         let dst  = (currentPath as NSString).appendingPathComponent(name)
         let task = TransferTask(filename: name, direction: .upload)
@@ -231,7 +227,9 @@ final class FileBrowserViewModel: ObservableObject {
 
         task.cancellable = Task {
             do {
-                try await provider.upload(data, to: dst) { [weak task] p in
+                // Streaming upload — provider reads bytes from disk as needed
+                // so we don't load the entire file into memory.
+                try await provider.uploadFile(at: url, to: dst) { [weak task] p in
                     Task { @MainActor in task?.progress = p }
                 }
                 task.state = .done
@@ -269,6 +267,59 @@ final class FileBrowserViewModel: ObservableObject {
         try await provider.upload(data, to: item.path, progress: nil)
         appState.addRecent(item)
         await loadDirectory()
+    }
+
+    /// Returns a streaming target the AV player can use directly, if the
+    /// provider exposes one (HTTP-based providers like WebDAV/UPnP do; SFTP
+    /// and SMB return `nil` and the caller must fall back to `download`).
+    func streamingTarget(for item: FileItem) -> StreamingTarget? {
+        provider.streamingURL(for: item.path)
+    }
+
+    /// Convenience for views that want pinning state without reaching into
+    /// `OfflinePinService` directly.
+    func cachedOfflineURL(for item: FileItem) -> URL? {
+        guard let connId = item.connectionId else { return nil }
+        return OfflinePinService.shared.cachedURL(for: connId, path: item.path)
+    }
+
+    /// Resolves the connection backing this browser, if any.
+    func currentConnection() -> ServerConnection? {
+        guard providerType.isNetwork else { return nil }
+        // The first item provides a hint; otherwise fall back to the most
+        // recently active connection on the AppState.
+        if let id = items.compactMap(\.connectionId).first,
+           let conn = appState.connections.first(where: { $0.id == id }) {
+            return conn
+        }
+        return appState.activeConnection
+    }
+
+    func togglePin(_ item: FileItem) {
+        guard let conn = currentConnection() else { return }
+        OfflinePinService.shared.togglePin(item: item, connection: conn)
+        if OfflinePinService.shared.isPinned(connectionId: conn.id, path: item.path) {
+            // Kick off an immediate sync so the file actually lands on disk.
+            Task {
+                await OfflinePinService.shared.sync(connection: conn, provider: provider)
+            }
+        }
+    }
+
+    func isPinned(_ item: FileItem) -> Bool {
+        guard let connId = item.connectionId ?? currentConnection()?.id else { return false }
+        return OfflinePinService.shared.isPinned(connectionId: connId, path: item.path)
+    }
+
+    /// Enqueues a real download via `BackgroundTransferService` for the
+    /// "Save to Files" action. Distinct from the in-memory preview path.
+    func enqueueBackgroundDownload(_ item: FileItem) {
+        let conn = currentConnection()
+        BackgroundTransferService.shared.enqueueDownload(
+            item: item,
+            connection: conn,
+            provider: provider
+        )
     }
 
     // MARK: - Selection

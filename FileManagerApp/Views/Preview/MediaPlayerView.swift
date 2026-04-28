@@ -15,7 +15,19 @@ struct MediaPlayerView: View {
     init(url: URL, itemType: FileItemType) {
         self.url      = url
         self.itemType = itemType
-        self._playerVM = StateObject(wrappedValue: MediaPlayerViewModel(url: url))
+        self._playerVM = StateObject(wrappedValue: MediaPlayerViewModel(url: url, headers: [:]))
+    }
+
+    /// Streaming initializer — used when we want to play directly from a NAS
+    /// without downloading the whole file first. Auth headers are forwarded to
+    /// `AVURLAsset` via `AVURLAssetHTTPHeaderFieldsKey`.
+    init(streamingTarget: StreamingTarget, itemType: FileItemType) {
+        self.url      = streamingTarget.url
+        self.itemType = itemType
+        self._playerVM = StateObject(wrappedValue: MediaPlayerViewModel(
+            url: streamingTarget.url,
+            headers: streamingTarget.headers
+        ))
     }
 
     var body: some View {
@@ -233,8 +245,15 @@ final class MediaPlayerViewModel: ObservableObject {
     let player: AVPlayer
     private var timeObserver: Any?
 
-    init(url: URL) {
-        let item    = AVPlayerItem(url: url)
+    init(url: URL, headers: [String: String]) {
+        // Pass auth headers (Basic, Bearer, etc.) directly to the AVURLAsset
+        // so the player can stream from protected sources without downloading
+        // the whole file first. Only used for HTTP/S sources.
+        let assetOptions: [String: Any] = headers.isEmpty
+            ? [:]
+            : ["AVURLAssetHTTPHeaderFieldsKey": headers]
+        let asset   = AVURLAsset(url: url, options: assetOptions)
+        let item    = AVPlayerItem(asset: asset)
         self.player = AVPlayer(playerItem: item)
 
         Task {

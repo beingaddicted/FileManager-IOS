@@ -35,6 +35,20 @@ struct SettingsView: View {
                     }
                 }
 
+                // MARK: NAS features
+                Section("Server Features") {
+                    NavigationLink {
+                        PhotoBackupSettingsView()
+                    } label: {
+                        Label("Photo Backup", systemImage: "photo.on.rectangle.angled")
+                    }
+                    NavigationLink {
+                        OfflinePinsView()
+                    } label: {
+                        Label("Offline Files", systemImage: "pin.fill")
+                    }
+                }
+
                 // MARK: Browser
                 Section("Browser") {
                     Picker("Sort By", selection: $appState.sortField) {
@@ -42,19 +56,15 @@ struct SettingsView: View {
                             Text(f.label).tag(f)
                         }
                     }
-
                     Toggle(isOn: $appState.sortAscending) {
                         Label("Sort Ascending", systemImage: appState.sortAscending ? "chevron.up" : "chevron.down")
                     }
-
                     Toggle(isOn: $appState.showHiddenFiles) {
                         Label("Show Hidden Files", systemImage: "eye.slash")
                     }
-
                     Toggle(isOn: $appState.thumbnailsEnabled) {
                         Label("Show Thumbnails", systemImage: "photo")
                     }
-
                     Toggle(isOn: $appState.previewOnTap) {
                         Label("Preview on Tap", systemImage: "hand.tap")
                     }
@@ -65,8 +75,7 @@ struct SettingsView: View {
                     HStack {
                         Label("Cache Size", systemImage: "internaldrive")
                         Spacer()
-                        Text(cacheSize)
-                            .foregroundStyle(.secondary)
+                        Text(cacheSize).foregroundStyle(.secondary)
                     }
                     Button(role: .destructive) {
                         showClearCacheConfirm = true
@@ -83,10 +92,8 @@ struct SettingsView: View {
                     } label: {
                         Label("Add Folder From Files", systemImage: "folder.badge.plus")
                     }
-
                     if externalFolders.isEmpty {
-                        Text("No extra folders added yet.")
-                            .foregroundStyle(.secondary)
+                        Text("No extra folders added yet.").foregroundStyle(.secondary)
                     } else {
                         ForEach(externalFolders, id: \.path) { folder in
                             HStack {
@@ -107,7 +114,6 @@ struct SettingsView: View {
                             }
                         }
                     }
-
                     if let folderAccessError {
                         Label(folderAccessError, systemImage: "exclamationmark.triangle.fill")
                             .font(.footnote)
@@ -116,7 +122,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Local Folder Access")
                 } footer: {
-                    Text("iOS sandbox limits direct device-wide access. Add folders from Files app to browse them in Local.")
+                    Text("Add folders from the Files app to browse them in the Files tab.")
                 }
 
                 // MARK: Recents
@@ -124,8 +130,7 @@ struct SettingsView: View {
                     HStack {
                         Label("Recent Files", systemImage: "clock")
                         Spacer()
-                        Text("\(appState.recentFiles.count)")
-                            .foregroundStyle(.secondary)
+                        Text("\(appState.recentFiles.count)").foregroundStyle(.secondary)
                     }
                     Button(role: .destructive) {
                         showClearRecentsConfirm = true
@@ -138,32 +143,27 @@ struct SettingsView: View {
 
                 // MARK: Protocol support
                 Section {
-                    protocolRow("FTP",          image: "network",          color: .orange,  supported: true)
-                    protocolRow("SFTP (SSH)",   image: "lock.shield.fill", color: .purple,  supported: true,  note: "Requires NMSSH pod")
-                    protocolRow("WebDAV",       image: "globe",            color: .teal,    supported: true)
-                    protocolRow("SMB",          image: "desktopcomputer",  color: .gray,    supported: false, note: "Requires AMSMB2 pod")
-                    protocolRow("UPnP / DLNA",  image: "tv.fill",          color: .red,     supported: true)
-                    protocolRow("iCloud Drive", image: "icloud.fill",      color: .cyan,    supported: true)
-                    protocolRow("Google Drive", image: "square.stack.3d.up.fill", color: .green, supported: true)
-                    protocolRow("Dropbox",      image: "shippingbox.fill", color: .blue,    supported: true)
-                    protocolRow("OneDrive",     image: "cloud.fill",       color: .blue,    supported: true)
+                    protocolRow("SMB / Windows Share", image: "desktopcomputer",     color: .blue,    note: "AMSMB2 / libsmb2 — Synology, TrueNAS, Unraid, macOS, Windows")
+                    protocolRow("SFTP (SSH)",          image: "lock.shield.fill",    color: .purple,  note: "NMSSH / libssh2 — any Linux/BSD server")
+                    protocolRow("WebDAV",              image: "globe",               color: .teal,    note: "Nextcloud, ownCloud, Synology DSM, Apache mod_dav")
+                    protocolRow("FTP",                 image: "network",             color: .orange,  note: "Read-only via URLSession (use SFTP for full management)")
+                    protocolRow("UPnP / DLNA",         image: "tv.fill",             color: .red,     note: "Discover and stream from media servers on your LAN")
+                    protocolRow("iCloud Drive",        image: "icloud.fill",         color: .cyan,    note: "Native iOS Files integration")
                 } header: {
-                    Text("Protocol Support")
+                    Text("Supported Servers")
                 }
 
                 // MARK: About
                 Section("About") {
                     HStack {
-                        Text("All-In-One File Manager")
+                        Text("File Manager")
                         Spacer()
-                        Text("1.0")
-                            .foregroundStyle(.secondary)
+                        Text("2.0").foregroundStyle(.secondary)
                     }
                     HStack {
                         Text("Build")
                         Spacer()
-                        Text("2025.1")
-                            .foregroundStyle(.secondary)
+                        Text("2026.1").foregroundStyle(.secondary)
                     }
                     Link(destination: URL(string: "https://github.com/beingaddicted/filemanager-ios")!) {
                         Label("GitHub Repository", systemImage: "link")
@@ -216,28 +216,21 @@ struct SettingsView: View {
 
     // MARK: - Protocol row
 
-    private func protocolRow(
-        _ name: String,
-        image: String,
-        color: Color,
-        supported: Bool,
-        note: String? = nil
-    ) -> some View {
+    private func protocolRow(_ name: String, image: String, color: Color, note: String) -> some View {
         HStack(spacing: 12) {
             Image(systemName: image)
                 .foregroundStyle(color)
                 .frame(width: 22)
             VStack(alignment: .leading, spacing: 2) {
                 Text(name)
-                if let note = note {
-                    Text(note)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                Text(note)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             Spacer()
-            Image(systemName: supported ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
-                .foregroundStyle(supported ? .green : .orange)
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(.green)
         }
     }
 
@@ -266,10 +259,8 @@ struct RecentsView: View {
 
     private var displayedItems: [FileItem] {
         switch selectedSection {
-        case .recents:
-            return appState.recentFiles
-        case .favorites:
-            return appState.favorites
+        case .recents:   return appState.recentFiles
+        case .favorites: return appState.favorites
         }
     }
 
@@ -299,13 +290,9 @@ struct RecentsView: View {
                         .onDelete { offsets in
                             switch selectedSection {
                             case .recents:
-                                offsets.forEach { i in
-                                    let _ = appState.recentFiles.remove(at: i)
-                                }
+                                offsets.forEach { i in _ = appState.recentFiles.remove(at: i) }
                             case .favorites:
-                                offsets.forEach { i in
-                                    let _ = appState.favorites.remove(at: i)
-                                }
+                                offsets.forEach { i in _ = appState.favorites.remove(at: i) }
                             }
                         }
                     }
@@ -346,15 +333,12 @@ struct RecentsView: View {
 }
 
 private enum HistorySection: CaseIterable, Hashable {
-    case recents
-    case favorites
+    case recents, favorites
 
     var title: String {
         switch self {
-        case .recents:
-            return "Recents"
-        case .favorites:
-            return "Favorites"
+        case .recents:   return "Recents"
+        case .favorites: return "Favorites"
         }
     }
 }

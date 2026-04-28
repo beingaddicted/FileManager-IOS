@@ -7,6 +7,7 @@ struct ConnectionsListView: View {
     @EnvironmentObject var connVM: ConnectionViewModel
 
     @State private var showAddConnection: Bool = false
+    @State private var showAdvancedAdd: Bool = false
     @State private var editingConnection: ServerConnection?
     @State private var presentedBrowser: BrowserPresentation?
 
@@ -66,17 +67,29 @@ struct ConnectionsListView: View {
                 }
             }
             .listStyle(.insetGrouped)
-            .navigationTitle("Connections")
+            .navigationTitle("Servers")
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button {
-                        showAddConnection = true
+                    Menu {
+                        Button {
+                            showAddConnection = true
+                        } label: {
+                            Label("Quick Add (Synology, TrueNAS…)", systemImage: "wand.and.stars")
+                        }
+                        Button {
+                            showAdvancedAdd = true
+                        } label: {
+                            Label("Manual Setup", systemImage: "slider.horizontal.3")
+                        }
                     } label: {
                         Image(systemName: "plus")
                     }
                 }
             }
             .sheet(isPresented: $showAddConnection) {
+                NASPresetWizardView()
+            }
+            .sheet(isPresented: $showAdvancedAdd) {
                 AddConnectionView()
             }
             .sheet(item: $editingConnection) { conn in
