@@ -3,11 +3,15 @@ import SwiftUI
 // MARK: - Content View (Root)
 
 struct ContentView: View {
-    @EnvironmentObject var appState: AppState
-    @EnvironmentObject var connVM: ConnectionViewModel
+    @Environment(AppState.self) private var appState
+    @Environment(ConnectionViewModel.self) private var connVM
 
     var body: some View {
-        TabView(selection: $appState.selectedTab) {
+        // `@Bindable` shadow is the canonical way to take bindings from an
+        // `@Environment`-supplied `@Observable` value.
+        @Bindable var appState = appState
+
+        return TabView(selection: $appState.selectedTab) {
             // MARK: Local
             NavigationStack {
                 FileBrowserView(vm: connVM.makeLocalBrowser())

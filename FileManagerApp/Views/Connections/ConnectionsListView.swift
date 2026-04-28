@@ -3,8 +3,8 @@ import SwiftUI
 // MARK: - Connections List
 
 struct ConnectionsListView: View {
-    @EnvironmentObject var appState: AppState
-    @EnvironmentObject var connVM: ConnectionViewModel
+    @Environment(AppState.self) private var appState
+    @Environment(ConnectionViewModel.self) private var connVM
 
     @State private var showAddConnection: Bool = false
     @State private var showAdvancedAdd: Bool = false
@@ -243,8 +243,8 @@ private struct BrowserPresentation: Identifiable {
 // MARK: - UPnP Discovery View
 
 struct UPnPDiscoveryView: View {
-    @StateObject private var discovery = NetworkDiscovery.shared
-    @EnvironmentObject var connVM: ConnectionViewModel
+    private let discovery = NetworkDiscovery.shared
+    @Environment(ConnectionViewModel.self) private var connVM
     @State private var manualEndpoint: String = ""
     @State private var manualPort: String = "80"
     @State private var isManualConnecting = false

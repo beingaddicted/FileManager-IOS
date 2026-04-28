@@ -4,9 +4,9 @@ import UniformTypeIdentifiers
 // MARK: - File Browser View
 
 struct FileBrowserView: View {
-    @ObservedObject var vm: FileBrowserViewModel
-    @EnvironmentObject var appState: AppState
-    @EnvironmentObject var connVM: ConnectionViewModel
+    var vm: FileBrowserViewModel
+    @Environment(AppState.self) private var appState
+    @Environment(ConnectionViewModel.self) private var connVM
 
     @State private var selectedItem: FileItem?
     @State private var previewItem: FileItem?
@@ -33,7 +33,11 @@ struct FileBrowserView: View {
     ]
 
     var body: some View {
-        ZStack {
+        // `@Bindable` shadows let us derive `$vm.searchText` etc. from the
+        // `@Observable` view model.
+        @Bindable var vm = vm
+
+        return ZStack {
             // MARK: Content
             VStack(spacing: 0) {
                 if vm.breadcrumbs.count > 1 {

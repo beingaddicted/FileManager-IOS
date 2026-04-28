@@ -1,5 +1,5 @@
 import Foundation
-import Combine
+import Observation
 import UIKit
 
 // MARK: - Background Transfer Service
@@ -11,16 +11,16 @@ import UIKit
 // The queue itself is persisted to disk so transfers can be inspected and
 // retried after a launch — much like the iOS Files app's "Recent Activity."
 
+@Observable
 @MainActor
-final class BackgroundTransferService: ObservableObject {
-    static let shared = BackgroundTransferService()
+final class BackgroundTransferService {
+    @ObservationIgnored static let shared = BackgroundTransferService()
 
-    @Published private(set) var transfers: [TransferRecord] = []
+    private(set) var transfers: [TransferRecord] = []
 
-    private let queueFile: URL
-    private var bag = Set<AnyCancellable>()
+    @ObservationIgnored private let queueFile: URL
     /// Currently-running tasks keyed by record id (only present for in-flight transfers).
-    private var inflight: [UUID: Task<Void, Never>] = [:]
+    @ObservationIgnored private var inflight: [UUID: Task<Void, Never>] = [:]
 
     private init() {
         let dir = FileManager.default.cachesDirectory.appendingPathComponent("transfers", isDirectory: true)

@@ -1,6 +1,6 @@
 import Foundation
 import Photos
-import Combine
+import Observation
 import UIKit
 
 // MARK: - Photo Backup Service
@@ -13,21 +13,22 @@ import UIKit
 // in a JSON sidecar alongside the user's config. The asset *content* itself
 // stays in the Photos library; we don't duplicate it locally.
 
+@Observable
 @MainActor
-final class PhotoBackupService: ObservableObject {
-    static let shared = PhotoBackupService()
+final class PhotoBackupService {
+    @ObservationIgnored static let shared = PhotoBackupService()
 
-    @Published private(set) var config: PhotoBackupConfig = .disabled
-    @Published private(set) var lastRun: Date?
-    @Published private(set) var lastError: String?
-    @Published private(set) var isRunning: Bool = false
-    @Published private(set) var pendingCount: Int = 0
-    @Published private(set) var uploadedCount: Int = 0
+    private(set) var config: PhotoBackupConfig = .disabled
+    private(set) var lastRun: Date?
+    private(set) var lastError: String?
+    private(set) var isRunning: Bool = false
+    private(set) var pendingCount: Int = 0
+    private(set) var uploadedCount: Int = 0
 
-    private let configKey = "photo_backup_config_v1"
-    private let stateFile: URL
-    private var syncedIdentifiers: Set<String> = []
-    private var currentTask: Task<Void, Never>?
+    @ObservationIgnored private let configKey = "photo_backup_config_v1"
+    @ObservationIgnored private let stateFile: URL
+    @ObservationIgnored private var syncedIdentifiers: Set<String> = []
+    @ObservationIgnored private var currentTask: Task<Void, Never>?
 
     private init() {
         let dir = FileManager.default.cachesDirectory.appendingPathComponent("photoBackup", isDirectory: true)

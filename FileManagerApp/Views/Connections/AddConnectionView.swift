@@ -9,8 +9,8 @@ import SwiftUI
 
 struct AddConnectionView: View {
     @Environment(\.dismiss) private var dismiss
-    @EnvironmentObject var appState: AppState
-    @EnvironmentObject var connVM: ConnectionViewModel
+    @Environment(AppState.self) private var appState
+    @Environment(ConnectionViewModel.self) private var connVM
 
     var existing: ServerConnection?
 

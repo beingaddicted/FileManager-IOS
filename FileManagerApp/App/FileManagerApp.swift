@@ -4,8 +4,10 @@ import AVFoundation
 
 @main
 struct AllFilesApp: App {
-    @StateObject private var appState: AppState
-    @StateObject private var connVM: ConnectionViewModel
+    /// `@State` is the iOS-17 owner for `@Observable` reference types in the
+    /// SwiftUI lifecycle (replaces `@StateObject`).
+    @State private var appState: AppState
+    @State private var connVM: ConnectionViewModel
 
     /// Bridges `application(_:handleEventsForBackgroundURLSession:completionHandler:)`
     /// into the SwiftUI app so background-session completions get delivered.
@@ -13,8 +15,8 @@ struct AllFilesApp: App {
 
     init() {
         let state = AppState()
-        _appState = StateObject(wrappedValue: state)
-        _connVM   = StateObject(wrappedValue: ConnectionViewModel(appState: state))
+        _appState = State(initialValue: state)
+        _connVM   = State(initialValue: ConnectionViewModel(appState: state))
 
         // Configure audio session for background playback
         configureAudioSession()
@@ -23,8 +25,8 @@ struct AllFilesApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .environmentObject(appState)
-                .environmentObject(connVM)
+                .environment(appState)
+                .environment(connVM)
                 .onOpenURL { url in
                     Task { @MainActor in
                         handleIncomingOpenURL(url)

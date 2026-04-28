@@ -8,8 +8,8 @@ import SwiftUI
 
 struct NASPresetWizardView: View {
     @Environment(\.dismiss) private var dismiss
-    @EnvironmentObject var appState: AppState
-    @EnvironmentObject var connVM: ConnectionViewModel
+    @Environment(AppState.self) private var appState
+    @Environment(ConnectionViewModel.self) private var connVM
 
     @State private var selectedPreset: NASPreset?
 
@@ -93,8 +93,8 @@ struct NASPresetDetailView: View {
     let preset: NASPreset
     let onComplete: () -> Void
 
-    @EnvironmentObject var appState: AppState
-    @EnvironmentObject var connVM: ConnectionViewModel
+    @Environment(AppState.self) private var appState
+    @Environment(ConnectionViewModel.self) private var connVM
     @Environment(\.dismiss) private var dismiss
 
     @State private var connectionType: ConnectionType

@@ -1,6 +1,7 @@
 import SwiftUI
 import AVKit
 import AVFoundation
+import Observation
 
 // MARK: - Media Player (Audio + Video)
 
@@ -8,14 +9,14 @@ struct MediaPlayerView: View {
     let url: URL
     let itemType: FileItemType
 
-    @StateObject private var playerVM: MediaPlayerViewModel
+    @State private var playerVM: MediaPlayerViewModel
     @State private var showControls: Bool = true
     @State private var controlsTimer: Timer?
 
     init(url: URL, itemType: FileItemType) {
         self.url      = url
         self.itemType = itemType
-        self._playerVM = StateObject(wrappedValue: MediaPlayerViewModel(url: url, headers: [:]))
+        self._playerVM = State(initialValue: MediaPlayerViewModel(url: url, headers: [:]))
     }
 
     /// Streaming initializer — used when we want to play directly from a NAS
@@ -24,7 +25,7 @@ struct MediaPlayerView: View {
     init(streamingTarget: StreamingTarget, itemType: FileItemType) {
         self.url      = streamingTarget.url
         self.itemType = itemType
-        self._playerVM = StateObject(wrappedValue: MediaPlayerViewModel(
+        self._playerVM = State(initialValue: MediaPlayerViewModel(
             url: streamingTarget.url,
             headers: streamingTarget.headers
         ))
@@ -51,7 +52,8 @@ struct MediaPlayerView: View {
     }
 
     private var videoControls: some View {
-        VStack {
+        @Bindable var playerVM = playerVM
+        return VStack {
             Spacer()
             VStack(spacing: 0) {
                 // Scrubber
@@ -104,7 +106,8 @@ struct MediaPlayerView: View {
     // MARK: - Audio
 
     private var audioView: some View {
-        VStack(spacing: 32) {
+        @Bindable var playerVM = playerVM
+        return VStack(spacing: 32) {
             Spacer()
 
             // Album art placeholder
@@ -233,17 +236,18 @@ struct VideoPlayerRepresented: UIViewRepresentable {
 
 // MARK: - MediaPlayerViewModel
 
+@Observable
 @MainActor
-final class MediaPlayerViewModel: ObservableObject {
-    @Published var isPlaying: Bool   = false
-    @Published var currentTime: Double = 0
-    @Published var duration: Double  = 0
-    @Published var volume: Float     = 1.0 {
+final class MediaPlayerViewModel {
+    var isPlaying: Bool   = false
+    var currentTime: Double = 0
+    var duration: Double  = 0
+    var volume: Float     = 1.0 {
         didSet { player.volume = volume }
     }
 
-    let player: AVPlayer
-    private var timeObserver: Any?
+    @ObservationIgnored let player: AVPlayer
+    @ObservationIgnored private var timeObserver: Any?
 
     init(url: URL, headers: [String: String]) {
         // Forward auth headers (Basic, Bearer, etc.) to AVURLAsset so the

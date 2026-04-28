@@ -1,40 +1,46 @@
 import Foundation
 import SwiftUI
-import Combine
+import Observation
 
 // MARK: - FileBrowserViewModel
 
+@Observable
 @MainActor
-final class FileBrowserViewModel: ObservableObject {
+final class FileBrowserViewModel {
     // MARK: - State
 
-    @Published var items: [FileItem] = [] {
+    var items: [FileItem] = [] {
         didSet { rebuildNameIndex() }
     }
-    @Published var selectedItems: Set<FileItem> = []
-    @Published var currentPath: String = "/"
-    @Published var pathStack: [String] = []
-    @Published var isLoading: Bool = false
-    @Published var error: String?
-    @Published var searchText: String = ""
+    var selectedItems: Set<FileItem> = []
+    var currentPath: String = "/"
+    var pathStack: [String] = []
+    var isLoading: Bool = false
+    var error: String?
+    var searchText: String = "" {
+        didSet { scheduleSearchDebounce() }
+    }
     /// Debounced echo of `searchText`; avoids re-running the filter on every keystroke.
-    @Published private var debouncedSearch: String = ""
-    @Published var transferTasks: [TransferTask] = []
-    @Published var clipboardItems: [FileItem] = []
-    @Published var clipboardMode: ClipboardMode = .copy
-    @Published var isSelecting: Bool = false
+    private var debouncedSearch: String = ""
+    var transferTasks: [TransferTask] = []
+    var clipboardItems: [FileItem] = []
+    var clipboardMode: ClipboardMode = .copy
+    var isSelecting: Bool = false
 
     // MARK: - Dependencies
 
-    private var provider: FileProvider
-    let providerType: ProviderType
-    private let appState: AppState
-    private var bag = Set<AnyCancellable>()
+    @ObservationIgnored private var provider: FileProvider
+    @ObservationIgnored let providerType: ProviderType
+    @ObservationIgnored private let appState: AppState
+    /// In-flight debounce task. Replaced on every keystroke so only the
+    /// last one applies. Uses a Task instead of Combine because Combine's
+    /// `debounce` operator wants an `ObservableObject` publisher.
+    @ObservationIgnored private var searchDebounceTask: Task<Void, Never>?
 
     /// Pre-lowered file names keyed by `FileItem.id`. Building this once when
     /// `items` changes lets `filteredItems` use a cheap `contains(_:)` instead
     /// of `localizedCaseInsensitiveContains` per-keystroke per-row.
-    private var nameIndex: [String: String] = [:]
+    @ObservationIgnored private var nameIndex: [String: String] = [:]
 
     private func rebuildNameIndex() {
         nameIndex.removeAll(keepingCapacity: true)
@@ -77,16 +83,22 @@ final class FileBrowserViewModel: ObservableObject {
         self.provider     = provider
         self.providerType = providerType
         self.appState     = appState
+    }
 
-        // Debounce search input so a fast typist on a 5,000-file folder
-        // doesn't kick off a filter+sort pass on every keystroke.
-        $searchText
-            .removeDuplicates()
-            .debounce(for: .milliseconds(220), scheduler: RunLoop.main)
-            .sink { [weak self] new in
-                self?.debouncedSearch = new
+    /// Pushes `searchText` into `debouncedSearch` after a 220 ms quiet period.
+    /// Combine's `.debounce` is awkward against `@Observable` because there's
+    /// no `$searchText` publisher; a self-cancelling Task is the simplest
+    /// equivalent.
+    private func scheduleSearchDebounce() {
+        searchDebounceTask?.cancel()
+        let snapshot = searchText
+        searchDebounceTask = Task { [weak self] in
+            try? await Task.sleep(nanoseconds: 220_000_000)
+            guard !Task.isCancelled, let self else { return }
+            if self.debouncedSearch != snapshot {
+                self.debouncedSearch = snapshot
             }
-            .store(in: &bag)
+        }
     }
 
     // MARK: - Navigation

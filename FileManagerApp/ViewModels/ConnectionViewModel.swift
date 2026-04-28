@@ -1,17 +1,18 @@
 import Foundation
 import SwiftUI
-import Combine
+import Observation
 
 // MARK: - ConnectionViewModel
 
+@Observable
 @MainActor
-final class ConnectionViewModel: ObservableObject {
-    @Published var activeProviders: [UUID: FileProvider] = [:]
-    @Published var connectionStates: [UUID: ConnectionState] = [:]
-    @Published var error: String?
+final class ConnectionViewModel {
+    var activeProviders: [UUID: FileProvider] = [:]
+    var connectionStates: [UUID: ConnectionState] = [:]
+    var error: String?
 
-    private let appState: AppState
-    private lazy var localBrowserVM = FileBrowserViewModel(
+    @ObservationIgnored private let appState: AppState
+    @ObservationIgnored private lazy var localBrowserVM = FileBrowserViewModel(
         provider:     FileProviderFactory.makeLocal(),
         providerType: .local,
         appState:     appState

@@ -7,9 +7,9 @@ import SwiftUI
 // on-demand sync run.
 
 struct PhotoBackupSettingsView: View {
-    @EnvironmentObject var appState: AppState
-    @EnvironmentObject var connVM: ConnectionViewModel
-    @StateObject private var service = PhotoBackupService.shared
+    @Environment(AppState.self) private var appState
+    @Environment(ConnectionViewModel.self) private var connVM
+    private let service = PhotoBackupService.shared
     @State private var draft: PhotoBackupConfig = .disabled
     @State private var didLoad = false
 
@@ -154,9 +154,9 @@ struct PhotoBackupSettingsView: View {
 // MARK: - Offline Pins View
 
 struct OfflinePinsView: View {
-    @EnvironmentObject var appState: AppState
-    @EnvironmentObject var connVM: ConnectionViewModel
-    @StateObject private var service = OfflinePinService.shared
+    @Environment(AppState.self) private var appState
+    @Environment(ConnectionViewModel.self) private var connVM
+    private let service = OfflinePinService.shared
 
     var body: some View {
         List {

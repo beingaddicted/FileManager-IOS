@@ -1,5 +1,5 @@
 import Foundation
-import Combine
+import Observation
 
 // MARK: - Offline Pin Service
 //
@@ -7,16 +7,17 @@ import Combine
 // into a local cache folder under `Documents/Pinned/<connection>/<path>`.
 // Pins are persisted in JSON so they survive launches.
 
+@Observable
 @MainActor
-final class OfflinePinService: ObservableObject {
-    static let shared = OfflinePinService()
+final class OfflinePinService {
+    @ObservationIgnored static let shared = OfflinePinService()
 
-    @Published private(set) var pins: [OfflinePin] = []
-    @Published private(set) var isSyncing: Bool = false
-    @Published private(set) var lastError: String?
+    private(set) var pins: [OfflinePin] = []
+    private(set) var isSyncing: Bool = false
+    private(set) var lastError: String?
 
-    private let pinsKey = "offline_pins_v1"
-    private let rootDir: URL
+    @ObservationIgnored private let pinsKey = "offline_pins_v1"
+    @ObservationIgnored private let rootDir: URL
 
     private init() {
         let docs = FileManager.default.documentsDirectory

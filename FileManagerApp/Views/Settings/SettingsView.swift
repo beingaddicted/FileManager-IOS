@@ -4,7 +4,7 @@ import UniformTypeIdentifiers
 // MARK: - Settings View
 
 struct SettingsView: View {
-    @EnvironmentObject var appState: AppState
+    @Environment(AppState.self) private var appState
     @State private var showClearRecentsConfirm = false
     @State private var showClearCacheConfirm   = false
     @State private var cacheSize: String       = "Calculating…"
@@ -18,7 +18,8 @@ struct SettingsView: View {
     }
 
     var body: some View {
-        NavigationStack {
+        @Bindable var appState = appState
+        return NavigationStack {
             Form {
                 // MARK: Appearance
                 Section("Appearance") {
@@ -246,7 +247,7 @@ struct SettingsView: View {
 // MARK: - Recents View
 
 struct RecentsView: View {
-    @EnvironmentObject var appState: AppState
+    @Environment(AppState.self) private var appState
 
     @State private var selectedSection: HistorySection = .recents
 

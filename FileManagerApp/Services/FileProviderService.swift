@@ -1,5 +1,5 @@
 import Foundation
-import Combine
+import Observation
 
 // MARK: - FileProvider Protocol
 //
@@ -133,14 +133,15 @@ enum FileProviderFactory {
 
 // MARK: - Transfer Task (in-flight UI state)
 
+@Observable
 @MainActor
-final class TransferTask: ObservableObject, Identifiable {
+final class TransferTask: Identifiable {
     let id = UUID()
     let filename: String
     let direction: Direction
-    @Published var progress: Double = 0
-    @Published var state: State = .queued
-    var cancellable: Task<Void, Error>?
+    var progress: Double = 0
+    var state: State = .queued
+    @ObservationIgnored var cancellable: Task<Void, Error>?
 
     enum Direction { case upload, download }
     enum State { case queued, active, paused, done, failed }

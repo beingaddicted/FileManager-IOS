@@ -1,19 +1,20 @@
 import Foundation
 import Network
-import Combine
+import Observation
 
 // MARK: - Network Discovery (SSDP + mDNS)
 
+@Observable
 @MainActor
-final class NetworkDiscovery: ObservableObject {
-    @Published var discoveredDevices: [UPnPDevice] = []
-    @Published var isDiscovering: Bool = false
+final class NetworkDiscovery {
+    var discoveredDevices: [UPnPDevice] = []
+    var isDiscovering: Bool = false
 
-    private var connections: [NWConnection] = []
-    private var discoveryTask: Task<Void, Never>?
-    private var knownLocations = Set<String>()
+    @ObservationIgnored private var connections: [NWConnection] = []
+    @ObservationIgnored private var discoveryTask: Task<Void, Never>?
+    @ObservationIgnored private var knownLocations = Set<String>()
 
-    static let shared = NetworkDiscovery()
+    @ObservationIgnored static let shared = NetworkDiscovery()
     private init() {}
 
     // MARK: - Start discovery

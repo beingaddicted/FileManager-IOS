@@ -6,9 +6,9 @@ import SwiftUI
 // the user inspect progress, retry failed transfers, and clear completed.
 
 struct TransfersView: View {
-    @EnvironmentObject var appState: AppState
-    @EnvironmentObject var connVM: ConnectionViewModel
-    @StateObject private var service = BackgroundTransferService.shared
+    @Environment(AppState.self) private var appState
+    @Environment(ConnectionViewModel.self) private var connVM
+    private let service = BackgroundTransferService.shared
 
     var body: some View {
         NavigationStack {
