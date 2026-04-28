@@ -8,13 +8,17 @@ import Combine
 final class FileBrowserViewModel: ObservableObject {
     // MARK: - State
 
-    @Published var items: [FileItem] = []
+    @Published var items: [FileItem] = [] {
+        didSet { rebuildNameIndex() }
+    }
     @Published var selectedItems: Set<FileItem> = []
     @Published var currentPath: String = "/"
     @Published var pathStack: [String] = []
     @Published var isLoading: Bool = false
     @Published var error: String?
     @Published var searchText: String = ""
+    /// Debounced echo of `searchText`; avoids re-running the filter on every keystroke.
+    @Published private var debouncedSearch: String = ""
     @Published var transferTasks: [TransferTask] = []
     @Published var clipboardItems: [FileItem] = []
     @Published var clipboardMode: ClipboardMode = .copy
@@ -25,14 +29,31 @@ final class FileBrowserViewModel: ObservableObject {
     private var provider: FileProvider
     let providerType: ProviderType
     private let appState: AppState
+    private var bag = Set<AnyCancellable>()
+
+    /// Pre-lowered file names keyed by `FileItem.id`. Building this once when
+    /// `items` changes lets `filteredItems` use a cheap `contains(_:)` instead
+    /// of `localizedCaseInsensitiveContains` per-keystroke per-row.
+    private var nameIndex: [String: String] = [:]
+
+    private func rebuildNameIndex() {
+        nameIndex.removeAll(keepingCapacity: true)
+        nameIndex.reserveCapacity(items.count)
+        for item in items {
+            nameIndex[item.id] = item.name.lowercased()
+        }
+    }
 
     // MARK: - Computed
 
     var filteredItems: [FileItem] {
         let visible = appState.showHiddenFiles ? items : items.filter { !$0.isHidden }
         let sorted  = sort(visible)
-        if searchText.isEmpty { return sorted }
-        return sorted.filter { $0.name.localizedCaseInsensitiveContains(searchText) }
+        let query = debouncedSearch.trimmingCharacters(in: .whitespaces).lowercased()
+        if query.isEmpty { return sorted }
+        return sorted.filter { item in
+            (nameIndex[item.id] ?? item.name.lowercased()).contains(query)
+        }
     }
 
     var breadcrumbs: [Breadcrumb] {
@@ -56,6 +77,16 @@ final class FileBrowserViewModel: ObservableObject {
         self.provider     = provider
         self.providerType = providerType
         self.appState     = appState
+
+        // Debounce search input so a fast typist on a 5,000-file folder
+        // doesn't kick off a filter+sort pass on every keystroke.
+        $searchText
+            .removeDuplicates()
+            .debounce(for: .milliseconds(220), scheduler: RunLoop.main)
+            .sink { [weak self] new in
+                self?.debouncedSearch = new
+            }
+            .store(in: &bag)
     }
 
     // MARK: - Navigation
@@ -80,23 +111,75 @@ final class FileBrowserViewModel: ObservableObject {
     }
 
     // MARK: - Load
+    //
+    // Loading semantics:
+    //
+    //   * First load (items empty)  → show the full-screen spinner.
+    //   * Refresh (items populated) → keep the existing rows visible and
+    //     diff against the new listing. SwiftUI's `List`/`LazyVGrid` use
+    //     `FileItem.id` to identify rows, so it animates inserts/removes
+    //     in place without flicker as long as we don't replace the array
+    //     wholesale through a `isLoading=true` round-trip.
 
     func loadDirectory() async {
-        isLoading = true
-        error     = nil
+        let isFirstLoad = items.isEmpty
+        if isFirstLoad { isLoading = true }
+        error = nil
         defer { isLoading = false }
         do {
-            items = try await provider.listDirectory(at: currentPath)
+            let fresh = try await provider.listDirectory(at: currentPath)
+            applyFresh(items: fresh, isFirstLoad: isFirstLoad)
         } catch {
             self.error = error.localizedDescription
-            items = []
+            if isFirstLoad { items = [] }
         }
+    }
+
+    /// Apply `fresh` to `items`. For repeat loads, prefer in-place index
+    /// mutations so SwiftUI keeps row identity stable and animates the diff
+    /// rather than tearing down the whole list.
+    private func applyFresh(items fresh: [FileItem], isFirstLoad: Bool) {
+        if isFirstLoad {
+            items = fresh
+            return
+        }
+        // Use `Array.difference(from:by:)` keyed on item id+mtime so renamed
+        // files come through as a remove+insert (SwiftUI animates that), but
+        // unchanged files stay put (no row redraw).
+        let oldKeyed = items.map { Self.diffKey($0) }
+        let newKeyed = fresh.map { Self.diffKey($0) }
+        let diff = newKeyed.difference(from: oldKeyed)
+        if diff.isEmpty {
+            // Nothing changed — keep existing array reference so SwiftUI sees
+            // no work at all.
+            return
+        }
+        // Apply changes by walking the diff and mutating `items` in place.
+        var working = items
+        for change in diff {
+            switch change {
+            case let .remove(offset, _, _):
+                if offset < working.count {
+                    working.remove(at: offset)
+                }
+            case let .insert(offset, _, _):
+                let inserted = fresh[offset]
+                let safeOffset = min(offset, working.count)
+                working.insert(inserted, at: safeOffset)
+            }
+        }
+        items = working
+    }
+
+    private static func diffKey(_ item: FileItem) -> String {
+        "\(item.id)|\(Int(item.modifiedDate.timeIntervalSince1970))|\(item.size)"
     }
 
     /// Refreshes `items` without toggling `isLoading` (e.g. after delete so the list stays responsive).
     private func refreshItemsOnly() async {
         do {
-            items = try await provider.listDirectory(at: currentPath)
+            let fresh = try await provider.listDirectory(at: currentPath)
+            applyFresh(items: fresh, isFirstLoad: false)
         } catch {
             self.error = error.localizedDescription
         }

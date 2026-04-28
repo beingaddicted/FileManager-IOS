@@ -92,8 +92,71 @@ final class BackgroundTransferService: ObservableObject {
 
     // MARK: - Run
 
+    /// Called by `BackgroundWebDAVSession`'s delegate as bytes flow.
+    func updateProgress(recordId: UUID, fraction: Double) {
+        update(id: recordId) { rec in
+            rec.state = .active
+            rec.transferredBytes = Int64(Double(rec.totalBytes) * fraction)
+        }
+    }
+
+    /// Called by `BackgroundWebDAVSession` once a download lands on disk.
+    func completeDownload(recordId: UUID, localURL: URL) {
+        update(id: recordId) { rec in
+            rec.localFile        = localURL.path
+            rec.transferredBytes = rec.totalBytes
+            rec.state            = .done
+        }
+        inflight.removeValue(forKey: recordId)
+    }
+
+    /// Called by `BackgroundWebDAVSession` once an upload finishes.
+    func completeUpload(recordId: UUID) {
+        update(id: recordId) { rec in
+            rec.transferredBytes = rec.totalBytes
+            rec.state            = .done
+        }
+        inflight.removeValue(forKey: recordId)
+    }
+
+    /// Called by `BackgroundWebDAVSession` on error or HTTP ≥ 400.
+    func failTransfer(recordId: UUID, message: String) {
+        update(id: recordId) { rec in
+            rec.state        = .failed
+            rec.errorMessage = message
+        }
+        inflight.removeValue(forKey: recordId)
+    }
+
     private func run(_ record: TransferRecord, with provider: FileProvider, destinationFolder: URL?) {
         let id = record.id
+
+        // HTTP-shaped providers (WebDAV) get the real background URLSession so
+        // transfers continue when the app is suspended. Everything else runs
+        // through the regular Task path.
+        if let request = self.backgroundRequest(for: record, provider: provider) {
+            update(id: id) { $0.state = .active }
+            switch record.kind {
+            case .download:
+                BackgroundWebDAVSession.shared.enqueueDownload(
+                    request: request,
+                    recordId: id,
+                    destinationFolder: destinationFolder
+                )
+            case .upload:
+                guard let localPath = record.localFile else {
+                    failTransfer(recordId: id, message: "local source missing")
+                    return
+                }
+                BackgroundWebDAVSession.shared.enqueueUpload(
+                    request: request,
+                    fromFile: URL(fileURLWithPath: localPath),
+                    recordId: id
+                )
+            }
+            return
+        }
+
         let task = Task { [weak self] in
             guard let self else { return }
             await self.update(id: id) { $0.state = .active }
@@ -182,8 +245,24 @@ final class BackgroundTransferService: ObservableObject {
     func cancel(_ record: TransferRecord) {
         inflight[record.id]?.cancel()
         inflight.removeValue(forKey: record.id)
+        // Also cancel any background URLSession task for this record.
+        BackgroundWebDAVSession.shared.cancel(recordId: record.id)
         update(id: record.id) { rec in
             if rec.state != .done { rec.state = .failed; rec.errorMessage = "Cancelled" }
+        }
+    }
+
+    /// Decide whether a record can be served by the background URLSession.
+    private func backgroundRequest(for record: TransferRecord, provider: FileProvider) -> URLRequest? {
+        switch record.kind {
+        case .download:
+            return provider.backgroundDownloadRequest(for: record.remotePath)
+        case .upload:
+            guard let localPath = record.localFile else { return nil }
+            return provider.backgroundUploadRequest(
+                for: record.remotePath,
+                sourceFile: URL(fileURLWithPath: localPath)
+            )
         }
     }
 

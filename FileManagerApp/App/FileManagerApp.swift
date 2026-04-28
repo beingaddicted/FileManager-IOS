@@ -1,10 +1,15 @@
 import SwiftUI
+import UIKit
 import AVFoundation
 
 @main
 struct AllFilesApp: App {
     @StateObject private var appState: AppState
     @StateObject private var connVM: ConnectionViewModel
+
+    /// Bridges `application(_:handleEventsForBackgroundURLSession:completionHandler:)`
+    /// into the SwiftUI app so background-session completions get delivered.
+    @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
 
     init() {
         let state = AppState()
@@ -53,7 +58,6 @@ struct AllFilesApp: App {
             do {
                 try fm.copyItem(at: url, to: destination)
             } catch {
-                // Fallback copy for providers that block direct copy
                 let data = try Data(contentsOf: url)
                 try data.write(to: destination, options: .atomic)
             }
@@ -65,6 +69,31 @@ struct AllFilesApp: App {
             }
         } catch {
             appState.showError("Failed to open shared file: \(error.localizedDescription)")
+        }
+    }
+}
+
+// MARK: - AppDelegate
+//
+// SwiftUI doesn't surface the background-session relaunch hook, so we pipe
+// it through a `UIApplicationDelegateAdaptor`. iOS calls
+// `handleEventsForBackgroundURLSession` when it relaunches us in the
+// background to deliver completions for `BackgroundWebDAVSession`'s
+// transfers; we hand the system completion handler to the session, which
+// invokes it once the queue of pending events has drained.
+
+final class AppDelegate: NSObject, UIApplicationDelegate {
+    func application(
+        _ application: UIApplication,
+        handleEventsForBackgroundURLSession identifier: String,
+        completionHandler: @escaping () -> Void
+    ) {
+        if identifier == "app.filemanager.webdav.background" {
+            BackgroundWebDAVSession.shared.pendingSystemCompletionHandler = completionHandler
+        } else {
+            // Some other background session identifier we don't recognise —
+            // call the completion immediately so iOS can sleep us again.
+            completionHandler()
         }
     }
 }

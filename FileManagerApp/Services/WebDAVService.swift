@@ -123,6 +123,25 @@ final class WebDAVService: FileProvider {
         try validate(response, path: src)
     }
 
+    // MARK: - Background-session requests
+    //
+    // BackgroundWebDAVSession runs these on a `.background` URLSession so
+    // big transfers keep going while the app is suspended.
+
+    func backgroundDownloadRequest(for path: String) -> URLRequest? {
+        authorizedRequest(method: "GET", path: path)
+    }
+
+    func backgroundUploadRequest(for path: String, sourceFile: URL) -> URLRequest? {
+        var req = authorizedRequest(method: "PUT", path: path)
+        // Background uploadTask reads the body from a file URL, not httpBody.
+        if let size = (try? FileManager.default.attributesOfItem(atPath: sourceFile.path)[.size] as? Int64) {
+            req.setValue("\(size)", forHTTPHeaderField: "Content-Length")
+        }
+        req.setValue("application/octet-stream", forHTTPHeaderField: "Content-Type")
+        return req
+    }
+
     // MARK: - Streaming URL for AVPlayer
 
     func streamingURL(for path: String) -> StreamingTarget? {

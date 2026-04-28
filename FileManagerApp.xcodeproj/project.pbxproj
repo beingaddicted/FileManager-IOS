@@ -44,6 +44,7 @@
 		A1B2C3D4E5F6000000000335 /* NASPresetWizardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6000000000035 /* NASPresetWizardView.swift */; };
 		A1B2C3D4E5F6000000000336 /* TransfersView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6000000000036 /* TransfersView.swift */; };
 		A1B2C3D4E5F6000000000337 /* PhotoBackupSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6000000000037 /* PhotoBackupSettingsView.swift */; };
+		A1B2C3D4E5F6000000000338 /* BackgroundWebDAVSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6000000000038 /* BackgroundWebDAVSession.swift */; };
 		A1B2C3D4E5F6000000000401 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6000000000201 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
@@ -85,6 +86,7 @@
 		A1B2C3D4E5F6000000000035 /* NASPresetWizardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NASPresetWizardView.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F6000000000036 /* TransfersView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TransfersView.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F6000000000037 /* PhotoBackupSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhotoBackupSettingsView.swift; sourceTree = "<group>"; };
+		A1B2C3D4E5F6000000000038 /* BackgroundWebDAVSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundWebDAVSession.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F6000000000100 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A1B2C3D4E5F6000000000201 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A1B2C3D4E5F6000000000500 /* FileManagerApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FileManagerApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -226,6 +228,7 @@
 				A1B2C3D4E5F6000000000024 /* NetworkDiscovery.swift */,
 				A1B2C3D4E5F6000000000025 /* ThumbnailService.swift */,
 				A1B2C3D4E5F6000000000032 /* BackgroundTransferService.swift */,
+				A1B2C3D4E5F6000000000038 /* BackgroundWebDAVSession.swift */,
 				A1B2C3D4E5F6000000000033 /* PhotoBackupService.swift */,
 				A1B2C3D4E5F6000000000034 /* OfflinePinService.swift */,
 			);
@@ -358,6 +361,7 @@
 				A1B2C3D4E5F6000000000335 /* NASPresetWizardView.swift in Sources */,
 				A1B2C3D4E5F6000000000336 /* TransfersView.swift in Sources */,
 				A1B2C3D4E5F6000000000337 /* PhotoBackupSettingsView.swift in Sources */,
+				A1B2C3D4E5F6000000000338 /* BackgroundWebDAVSession.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

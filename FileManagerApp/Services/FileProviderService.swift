@@ -41,6 +41,13 @@ protocol FileProvider: AnyObject {
     /// providers that can't expose HTTP byte-range URLs (e.g. SFTP/SMB), in
     /// which case callers should fall back to `downloadToTemp`.
     func streamingURL(for path: String) -> StreamingTarget?
+
+    /// HTTP-shaped providers (WebDAV) return an authorised URLRequest that a
+    /// `URLSessionConfiguration.background(...)` session can run while the
+    /// app is suspended. SFTP/SMB return nil — those use libssh2/libsmb2
+    /// sockets that iOS can't keep alive in the background.
+    func backgroundDownloadRequest(for path: String) -> URLRequest?
+    func backgroundUploadRequest(for path: String, sourceFile: URL) -> URLRequest?
 }
 
 typealias ProgressHandler = @Sendable (Double) -> Void
@@ -71,6 +78,9 @@ extension FileProvider {
     }
 
     func streamingURL(for path: String) -> StreamingTarget? { nil }
+
+    func backgroundDownloadRequest(for path: String) -> URLRequest? { nil }
+    func backgroundUploadRequest(for path: String, sourceFile: URL) -> URLRequest? { nil }
 }
 
 // MARK: - Errors
