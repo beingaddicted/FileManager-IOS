@@ -121,6 +121,10 @@ final class FileBrowserViewModel: ObservableObject {
     // MARK: - File operations
 
     func createFolder(named name: String) async {
+        if providerType == .local && currentPath == "/" {
+            self.error = "Open a location (Documents/Downloads/etc.) before creating a folder."
+            return
+        }
         let path = currentPath.hasSuffix("/") ? currentPath + name : currentPath + "/" + name
         do {
             try await provider.createDirectory(at: path)
@@ -190,6 +194,10 @@ final class FileBrowserViewModel: ObservableObject {
     // MARK: - Upload
 
     func upload(url: URL) async {
+        if providerType == .local && currentPath == "/" {
+            error = "Open a location before uploading files."
+            return
+        }
         guard let data = try? Data(contentsOf: url) else {
             error = "Failed to read file"
             return

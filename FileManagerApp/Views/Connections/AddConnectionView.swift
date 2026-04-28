@@ -22,6 +22,11 @@ struct AddConnectionView: View {
 
     private var isEditing: Bool { existing != nil }
 
+    init(existing: ServerConnection? = nil, preferredType: ConnectionType? = nil) {
+        self.existing = existing
+        _connectionType = State(initialValue: preferredType ?? .ftp)
+    }
+
     var body: some View {
         NavigationStack {
             Form {
@@ -37,7 +42,7 @@ struct AddConnectionView: View {
                             .tag(type)
                         }
                     }
-                    .onChange(of: connectionType) { _, new in
+                    .onChange(of: connectionType) { new in
                         if portText.isEmpty || Int(portText) == ConnectionType.allCases.first(where: { _ in true })?.defaultPort {
                             portText = "\(new.defaultPort)"
                         }

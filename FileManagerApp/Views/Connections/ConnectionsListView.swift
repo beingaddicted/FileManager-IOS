@@ -8,7 +8,7 @@ struct ConnectionsListView: View {
 
     @State private var showAddConnection: Bool = false
     @State private var editingConnection: ServerConnection?
-    @State private var connectingId: UUID?
+    @State private var presentedBrowser: BrowserPresentation?
 
     var body: some View {
         NavigationStack {
@@ -82,6 +82,11 @@ struct ConnectionsListView: View {
             .sheet(item: $editingConnection) { conn in
                 AddConnectionView(existing: conn)
             }
+            .sheet(item: $presentedBrowser) { destination in
+                NavigationStack {
+                    FileBrowserView(vm: destination.viewModel)
+                }
+            }
         }
     }
 
@@ -151,7 +156,7 @@ struct ConnectionsListView: View {
         .contentShape(Rectangle())
         .onTapGesture {
             if connected, let provider = connVM.provider(for: conn) {
-                navigateToBrowser(provider: provider, conn: conn)
+                presentBrowser(provider: provider, conn: conn)
             } else {
                 connect(conn)
             }
@@ -201,18 +206,25 @@ struct ConnectionsListView: View {
     }
 
     private func connect(_ conn: ServerConnection) {
-        connectingId = conn.id
         Task {
             if let provider = await connVM.connect(to: conn) {
-                navigateToBrowser(provider: provider, conn: conn)
+                presentBrowser(provider: provider, conn: conn)
             }
-            connectingId = nil
         }
     }
 
-    private func navigateToBrowser(provider: FileProvider, conn: ServerConnection) {
-        // Navigation handled via NavigationStack push - we trigger this via the row NavigationLink
+    private func presentBrowser(provider: FileProvider, conn: ServerConnection) {
+        appState.activeConnection = conn
+        presentedBrowser = BrowserPresentation(
+            id: conn.id,
+            viewModel: connVM.makeBrowser(for: provider, providerType: conn.type.providerType)
+        )
     }
+}
+
+private struct BrowserPresentation: Identifiable {
+    let id: UUID
+    let viewModel: FileBrowserViewModel
 }
 
 // MARK: - UPnP Discovery View

@@ -185,43 +185,68 @@ struct SettingsView: View {
 
 struct RecentsView: View {
     @EnvironmentObject var appState: AppState
-    @EnvironmentObject var connVM: ConnectionViewModel
 
-    @State private var previewItem: FileItem?
+    @State private var selectedSection: HistorySection = .recents
+
+    private var displayedItems: [FileItem] {
+        switch selectedSection {
+        case .recents:
+            return appState.recentFiles
+        case .favorites:
+            return appState.favorites
+        }
+    }
 
     var body: some View {
         NavigationStack {
             Group {
-                if appState.recentFiles.isEmpty {
+                if displayedItems.isEmpty {
                     emptyView
                 } else {
                     List {
-                        ForEach(appState.recentFiles) { item in
-                            Button {
-                                previewItem = item
-                            } label: {
-                                FileRowView(
-                                    item:          item,
-                                    isSelected:    false,
-                                    showThumbnail: appState.thumbnailsEnabled
-                                )
+                        Section {
+                            Picker("Section", selection: $selectedSection) {
+                                ForEach(HistorySection.allCases, id: \.self) { section in
+                                    Text(section.title).tag(section)
+                                }
                             }
-                            .buttonStyle(.plain)
+                            .pickerStyle(.segmented)
+                        }
+
+                        ForEach(displayedItems) { item in
+                            FileRowView(
+                                item:          item,
+                                isSelected:    false,
+                                showThumbnail: appState.thumbnailsEnabled
+                            )
                         }
                         .onDelete { offsets in
-                            offsets.forEach { i in
-                                let _ = appState.recentFiles.remove(at: i)
+                            switch selectedSection {
+                            case .recents:
+                                offsets.forEach { i in
+                                    let _ = appState.recentFiles.remove(at: i)
+                                }
+                            case .favorites:
+                                offsets.forEach { i in
+                                    let _ = appState.favorites.remove(at: i)
+                                }
                             }
                         }
                     }
                     .listStyle(.plain)
                 }
             }
-            .navigationTitle("Recent Files")
+            .navigationTitle(selectedSection == .recents ? "Recent Files" : "Favorites")
             .toolbar {
-                if !appState.recentFiles.isEmpty {
+                if !displayedItems.isEmpty {
                     ToolbarItem(placement: .navigationBarTrailing) {
-                        Button("Clear") { appState.clearRecents() }
+                        Button("Clear") {
+                            if selectedSection == .recents {
+                                appState.clearRecents()
+                            } else {
+                                appState.favorites.removeAll()
+                            }
+                        }
                     }
                 }
             }
@@ -233,13 +258,27 @@ struct RecentsView: View {
             Image(systemName: "clock.badge.questionmark")
                 .font(.system(size: 56))
                 .foregroundStyle(.tertiary)
-            Text("No Recent Files")
+            Text(selectedSection == .recents ? "No Recent Files" : "No Favorites Yet")
                 .font(.headline)
                 .foregroundStyle(.secondary)
-            Text("Files you open will appear here.")
+            Text(selectedSection == .recents ? "Files you open will appear here." : "Mark files as favorites from the file browser.")
                 .font(.subheadline)
                 .foregroundStyle(.tertiary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+private enum HistorySection: CaseIterable, Hashable {
+    case recents
+    case favorites
+
+    var title: String {
+        switch self {
+        case .recents:
+            return "Recents"
+        case .favorites:
+            return "Favorites"
+        }
     }
 }

@@ -11,6 +11,11 @@ final class ConnectionViewModel: ObservableObject {
     @Published var error: String?
 
     private let appState: AppState
+    private lazy var localBrowserVM = FileBrowserViewModel(
+        provider:     FileProviderFactory.makeLocal(),
+        providerType: .local,
+        appState:     appState
+    )
 
     enum ConnectionState {
         case disconnected, connecting, connected, failed(String)
@@ -68,11 +73,7 @@ final class ConnectionViewModel: ObservableObject {
     }
 
     func makeLocalBrowser() -> FileBrowserViewModel {
-        FileBrowserViewModel(
-            provider:     FileProviderFactory.makeLocal(),
-            providerType: .local,
-            appState:     appState
-        )
+        localBrowserVM
     }
 
     func makeICloudBrowser() -> FileBrowserViewModel {

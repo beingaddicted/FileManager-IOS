@@ -43,6 +43,7 @@ struct ContentView: View {
                 .tabItem {
                     Label("Settings", systemImage: "gearshape.fill")
                 }
+                .tag(AppTab.settings)
         }
         .preferredColorScheme(appState.theme.colorScheme)
         .errorAlert(error: $appState.alertError)
@@ -54,6 +55,7 @@ struct ContentView: View {
 struct CloudDashboardView: View {
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var connVM: ConnectionViewModel
+    @State private var showAddCloudConnection: Bool = false
 
     var cloudConnections: [ServerConnection] {
         appState.connections.filter { $0.type.isCloud }
@@ -86,7 +88,7 @@ struct CloudDashboardView: View {
 
                     // MARK: Add more
                     Button {
-                        // Will trigger add connection sheet for cloud types
+                        showAddCloudConnection = true
                     } label: {
                         HStack {
                             Image(systemName: "plus.circle.fill")
@@ -103,6 +105,9 @@ struct CloudDashboardView: View {
                 .padding(.vertical, 16)
             }
             .navigationTitle("Cloud")
+            .sheet(isPresented: $showAddCloudConnection) {
+                AddConnectionView(preferredType: .googleDrive)
+            }
         }
     }
 

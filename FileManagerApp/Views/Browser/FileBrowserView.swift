@@ -31,15 +31,23 @@ struct FileBrowserView: View {
     var body: some View {
         ZStack {
             // MARK: Content
-            Group {
-                if vm.isLoading && vm.items.isEmpty {
-                    loadingView
-                } else if vm.filteredItems.isEmpty && !vm.isLoading {
-                    emptyView
-                } else {
-                    contentView
+            VStack(spacing: 0) {
+                if vm.breadcrumbs.count > 1 {
+                    breadcrumbBar
                 }
+
+                Group {
+                    if vm.isLoading && vm.items.isEmpty {
+                        loadingView
+                    } else if vm.filteredItems.isEmpty && !vm.isLoading {
+                        emptyView
+                    } else {
+                        contentView
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
 
             // MARK: Transfer overlay
             if !vm.transferTasks.filter({ $0.state == .active }).isEmpty {
@@ -118,6 +126,38 @@ struct FileBrowserView: View {
         }
     }
 
+    // MARK: - Breadcrumb bar
+
+    private var breadcrumbBar: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(vm.breadcrumbs.indices, id: \.self) { i in
+                    let crumb = vm.breadcrumbs[i]
+                    Button {
+                        if crumb.path != vm.currentPath {
+                            vm.navigate(to: crumb.path)
+                        }
+                    } label: {
+                        Text(crumb.name)
+                            .font(.caption)
+                            .lineLimit(1)
+                    }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(crumb.path == vm.currentPath ? .primary : .secondary)
+
+                    if i < vm.breadcrumbs.count - 1 {
+                        Image(systemName: "chevron.right")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+        }
+        .background(Color(.secondarySystemBackground))
+    }
+
     // MARK: - Content view
 
     private var contentView: some View {
@@ -134,19 +174,38 @@ struct FileBrowserView: View {
     // MARK: - List
 
     private var listContent: some View {
-        List(vm.filteredItems, id: \.id, selection: vm.isSelecting ? $vm.selectedItems : .constant(nil)) { item in
-            FileRowView(
-                item:          item,
-                isSelected:    vm.selectedItems.contains(item),
-                showThumbnail: appState.thumbnailsEnabled,
-                onTap:         { handleTap(item) },
-                onLongPress:   { handleLongPress(item) }
-            )
-            .contextMenu { contextMenu(for: item) }
-            .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
-            .listRowSeparator(.hidden)
-            .listRowBackground(Color.clear)
-            .padding(.horizontal, 0)
+        Group {
+            if vm.isSelecting {
+                List(vm.filteredItems, id: \.id, selection: $vm.selectedItems) { item in
+                    FileRowView(
+                        item:          item,
+                        isSelected:    vm.selectedItems.contains(item),
+                        showThumbnail: appState.thumbnailsEnabled,
+                        onTap:         { handleTap(item) },
+                        onLongPress:   { handleLongPress(item) }
+                    )
+                    .contextMenu { contextMenu(for: item) }
+                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+                    .padding(.horizontal, 0)
+                }
+            } else {
+                List(vm.filteredItems, id: \.id) { item in
+                    FileRowView(
+                        item:          item,
+                        isSelected:    vm.selectedItems.contains(item),
+                        showThumbnail: appState.thumbnailsEnabled,
+                        onTap:         { handleTap(item) },
+                        onLongPress:   { handleLongPress(item) }
+                    )
+                    .contextMenu { contextMenu(for: item) }
+                    .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 16))
+                    .listRowSeparator(.hidden)
+                    .listRowBackground(Color.clear)
+                    .padding(.horizontal, 0)
+                }
+            }
         }
         .listStyle(.plain)
     }
@@ -238,6 +297,12 @@ struct FileBrowserView: View {
         ToolbarItem(placement: .navigationBarLeading) {
             if vm.isSelecting {
                 Button("Done") { vm.clearSelection() }
+            } else if vm.canGoBack {
+                Button {
+                    vm.goBack()
+                } label: {
+                    Label("Back", systemImage: "chevron.left")
+                }
             }
         }
 
@@ -383,6 +448,15 @@ struct FileBrowserView: View {
         }
 
         Button {
+            appState.toggleFavorite(item)
+        } label: {
+            Label(
+                appState.isFavorite(item) ? "Remove Favorite" : "Add Favorite",
+                systemImage: appState.isFavorite(item) ? "star.slash" : "star"
+            )
+        }
+
+        Button {
             newName = item.name
             renameItem = item
         } label: {
@@ -407,6 +481,7 @@ struct FileBrowserView: View {
         } else if item.isDirectory {
             vm.open(item)
         } else if item.isPreviewable && appState.previewOnTap {
+            appState.addRecent(item)
             previewItem = item
         } else {
             Task {

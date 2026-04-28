@@ -132,7 +132,9 @@ struct UniversalPreviewView: View {
         isLoading = true
         loadError = nil
         do {
-            let url = try await provider.download(item) ?? (throw FileProviderError.fileNotFound(item.path))
+            guard let url = await provider.download(item) else {
+                throw FileProviderError.fileNotFound(item.path)
+            }
             localURL = url
             if item.itemType == .text || item.itemType == .code {
                 textContent = try? String(contentsOf: url, encoding: .utf8)
@@ -198,25 +200,9 @@ struct QuickLookPreviewView: UIViewControllerRepresentable {
 struct OpenWithSheet: UIViewControllerRepresentable {
     let url: URL
 
-    func makeUIViewController(context: Context) -> UIDocumentInteractionController {
-        let c    = UIDocumentInteractionController(url: url)
-        c.delegate = context.coordinator
-        return c
+    func makeUIViewController(context: Context) -> UIActivityViewController {
+        UIActivityViewController(activityItems: [url], applicationActivities: nil)
     }
 
-    func updateUIViewController(_ c: UIDocumentInteractionController, context: Context) {}
-
-    func makeCoordinator() -> Coordinator { Coordinator() }
-
-    final class Coordinator: NSObject, UIDocumentInteractionControllerDelegate {
-        func documentInteractionControllerViewControllerForPreview(
-            _ controller: UIDocumentInteractionController
-        ) -> UIViewController {
-            UIApplication.shared.connectedScenes
-                .compactMap { $0 as? UIWindowScene }
-                .flatMap { $0.windows }
-                .first { $0.isKeyWindow }?
-                .rootViewController ?? UIViewController()
-        }
-    }
+    func updateUIViewController(_ vc: UIActivityViewController, context: Context) {}
 }

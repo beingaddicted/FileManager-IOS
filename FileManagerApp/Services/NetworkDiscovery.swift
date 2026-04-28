@@ -94,7 +94,9 @@ final class NetworkDiscovery: ObservableObject {
         self.listener = listener
 
         listener.newConnectionHandler = { [weak self] conn in
-            self?.handleIncoming(connection: conn)
+            Task { @MainActor in
+                self?.handleIncoming(connection: conn)
+            }
         }
         listener.start(queue: .global())
 

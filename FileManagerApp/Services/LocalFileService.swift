@@ -12,19 +12,46 @@ final class LocalFileService: FileProvider {
     // MARK: - List
 
     func listDirectory(at path: String) async throws -> [FileItem] {
+        if path == "/" {
+            return Self.rootPaths.map { root in
+                FileItem(
+                    id: root.path,
+                    name: root.name,
+                    path: root.path,
+                    size: 0,
+                    modifiedDate: Date(),
+                    isDirectory: true,
+                    isHidden: false,
+                    isSymlink: false,
+                    itemType: .folder,
+                    providerType: .local
+                )
+            }
+        }
+
         let fm  = FileManager.default
-        let url = URL(fileURLWithPath: path)
+        let url = URL(fileURLWithPath: path, isDirectory: true)
         let keys: [URLResourceKey] = [
             .nameKey, .isDirectoryKey, .fileSizeKey,
             .contentModificationDateKey, .creationDateKey,
             .isHiddenKey, .isSymbolicLinkKey
         ]
-        let contents = try fm.contentsOfDirectory(
-            at: url,
-            includingPropertiesForKeys: keys,
-            options: []
-        )
-        return contents.compactMap { FileItem.fromLocalURL($0) }
+        do {
+            let contents = try fm.contentsOfDirectory(
+                at: url,
+                includingPropertiesForKeys: keys,
+                options: [.skipsPackageDescendants]
+            )
+            return contents.compactMap { FileItem.fromLocalURL($0) }
+        } catch {
+            let nsError = error as NSError
+            if nsError.domain == NSCocoaErrorDomain &&
+                (nsError.code == CocoaError.fileReadNoPermission.rawValue ||
+                 nsError.code == CocoaError.fileReadInvalidFileName.rawValue) {
+                throw FileProviderError.permissionDenied
+            }
+            throw error
+        }
     }
 
     // MARK: - Info
@@ -100,6 +127,18 @@ final class LocalFileService: FileProvider {
            fm.fileExists(atPath: dl.path) {
             paths.append(("Downloads", dl.path))
         }
+        // Library
+        if let lib = fm.urls(for: .libraryDirectory, in: .userDomainMask).first,
+           fm.fileExists(atPath: lib.path) {
+            paths.append(("Library", lib.path))
+        }
+        // Caches
+        if let caches = fm.urls(for: .cachesDirectory, in: .userDomainMask).first,
+           fm.fileExists(atPath: caches.path) {
+            paths.append(("Caches", caches.path))
+        }
+        // Temporary
+        paths.append(("Temporary", fm.temporaryDirectory.path))
         // iCloud container root if available
         if let icloud = fm.url(forUbiquityContainerIdentifier: nil)?
             .appendingPathComponent("Documents") {

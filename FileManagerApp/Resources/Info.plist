@@ -107,7 +107,7 @@
 				<string>allfiles</string>
 			</array>
 		</dict>
-	</dict>
+	</array>
 
 	<!-- Supported document types -->
 	<key>CFBundleDocumentTypes</key>

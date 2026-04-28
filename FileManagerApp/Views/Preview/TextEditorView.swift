@@ -82,7 +82,7 @@ struct TextEditorView: View {
                 // Editor
                 if showLineNumbers {
                     LineNumberTextView(text: $text, fontSize: fontSize, isReadOnly: isReadOnly, wordWrap: wordWrap)
-                        .onChange(of: text) { _, _ in isDirty = text != initialContent }
+                        .onChange(of: text) { _ in isDirty = text != initialContent }
                 } else {
                     plainEditor
                 }
@@ -132,7 +132,7 @@ struct TextEditorView: View {
                 .scrollDisabled(true)
                 .frame(maxWidth: .infinity, minHeight: UIScreen.main.bounds.height - 200)
                 .padding(12)
-                .onChange(of: text) { _, _ in isDirty = text != initialContent }
+                .onChange(of: text) { _ in isDirty = text != initialContent }
         }
     }
 
@@ -157,7 +157,7 @@ struct TextEditorView: View {
                 .background(isOn.wrappedValue ? Color.accentColor.opacity(0.15) : .clear)
                 .clipShape(RoundedRectangle(cornerRadius: 6))
         }
-        .foregroundStyle(isOn.wrappedValue ? .tint : .primary)
+        .foregroundColor(isOn.wrappedValue ? .accentColor : .primary)
     }
 
     private var editorToolbarDivider: some View {

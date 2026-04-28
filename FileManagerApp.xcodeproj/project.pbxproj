@@ -83,7 +83,7 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		C1B2C3D4E5F6000000000001 /* root */ = {
+		C1B2C3D4E5F6000000000001 = {
 			isa = PBXGroup;
 			children = (
 				C1B2C3D4E5F6000000000003 /* FileManagerApp */,
@@ -253,7 +253,7 @@
 				BuildIndependentTargetsInParallel = 1;
 				LastSwiftUpdateCheck = 1500;
 				LastUpgradeCheck = 1500;
-				ORGANIZATIONNAME = "AllFiles";
+				ORGANIZATIONNAME = AllFiles;
 				TargetAttributes = {
 					E1B2C3D4E5F6000000000001 = {
 						CreatedOnToolsVersion = 15.0;
@@ -454,9 +454,10 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "";
+				DEVELOPMENT_TEAM = SRTZ8MBHSB;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = "FileManagerApp/Resources/Info.plist";
+				INFOPLIST_FILE = FileManagerApp/Resources/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -479,9 +480,10 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 1;
 				DEVELOPMENT_ASSET_PATHS = "";
+				DEVELOPMENT_TEAM = SRTZ8MBHSB;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = NO;
-				INFOPLIST_FILE = "FileManagerApp/Resources/Info.plist";
+				INFOPLIST_FILE = FileManagerApp/Resources/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -518,7 +520,6 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
-
 	};
 	rootObject = E1B2C3D4E5F6000000000002 /* Project object */;
 }

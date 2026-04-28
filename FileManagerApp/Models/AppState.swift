@@ -170,6 +170,7 @@ enum AppTab: String, CaseIterable {
     case network = "network"
     case cloud   = "cloud"
     case recents = "recents"
+    case settings = "settings"
 
     var title: String {
         switch self {
@@ -177,6 +178,7 @@ enum AppTab: String, CaseIterable {
         case .network: return "Network"
         case .cloud:   return "Cloud"
         case .recents: return "Recents"
+        case .settings:return "Settings"
         }
     }
 
@@ -186,6 +188,7 @@ enum AppTab: String, CaseIterable {
         case .network: return "network"
         case .cloud:   return "cloud.fill"
         case .recents: return "clock.fill"
+        case .settings:return "gearshape.fill"
         }
     }
 }

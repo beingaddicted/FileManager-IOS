@@ -38,7 +38,7 @@ struct PDFPreviewView: View {
         }
         .toolbar {
             if showSearch {
-                ToolbarItem(placement: .navigationBarBottom) {
+                ToolbarItem(placement: .principal) {
                     HStack {
                         Image(systemName: "magnifyingglass")
                             .foregroundStyle(.secondary)
