@@ -191,19 +191,20 @@ final class LocalFileService: FileProvider {
     func delete(at path: String) async throws {
         if let localIdentifier = Self.decodePhotoAssetIdentifier(from: path) {
             try await deletePhotoAsset(localIdentifier: localIdentifier)
-            return
-        }
-        try withSecurityScopedAccess(for: path) { resolvedPath in
-            let resolvedURL = URL(fileURLWithPath: resolvedPath)
-            do {
-                try coordinatedDelete(at: resolvedURL)
-            } catch {
-                // Some provider URLs fail when translated path mapping differs; retry original path.
-                guard resolvedPath != path else { throw error }
-                let originalURL = URL(fileURLWithPath: path)
-                try coordinatedDelete(at: originalURL)
+        } else {
+            try withSecurityScopedAccess(for: path) { resolvedPath in
+                let resolvedURL = URL(fileURLWithPath: resolvedPath)
+                do {
+                    try coordinatedDelete(at: resolvedURL)
+                } catch {
+                    // Some provider URLs fail when translated path mapping differs; retry original path.
+                    guard resolvedPath != path else { throw error }
+                    let originalURL = URL(fileURLWithPath: path)
+                    try coordinatedDelete(at: originalURL)
+                }
             }
         }
+        smartFolderCache.removeAll()
     }
 
     func createDirectory(at path: String) async throws {

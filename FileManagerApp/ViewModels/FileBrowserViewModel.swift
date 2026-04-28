@@ -84,13 +84,22 @@ final class FileBrowserViewModel: ObservableObject {
     func loadDirectory() async {
         isLoading = true
         error     = nil
+        defer { isLoading = false }
         do {
             items = try await provider.listDirectory(at: currentPath)
         } catch {
             self.error = error.localizedDescription
             items = []
         }
-        isLoading = false
+    }
+
+    /// Refreshes `items` without toggling `isLoading` (e.g. after delete so the list stays responsive).
+    private func refreshItemsOnly() async {
+        do {
+            items = try await provider.listDirectory(at: currentPath)
+        } catch {
+            self.error = error.localizedDescription
+        }
     }
 
     func refresh() async {
@@ -136,21 +145,31 @@ final class FileBrowserViewModel: ObservableObject {
     }
 
     func delete(_ item: FileItem) async {
+        let snapshot = items
+        items.removeAll { $0.id == item.id }
+        selectedItems.remove(item)
+
         do {
             try await provider.delete(at: item.path)
-            await loadDirectory()
         } catch {
             self.error = error.localizedDescription
+            items = snapshot
+            return
         }
+        await refreshItemsOnly()
     }
 
     func deleteSelected() async {
-        for item in selectedItems {
+        let toDelete = Array(selectedItems)
+        let ids = Set(toDelete.map(\.id))
+        items.removeAll { ids.contains($0.id) }
+        clearSelection()
+
+        for item in toDelete {
             do { try await provider.delete(at: item.path) }
             catch { self.error = error.localizedDescription }
         }
-        clearSelection()
-        await loadDirectory()
+        await refreshItemsOnly()
     }
 
     func rename(_ item: FileItem, to newName: String) async {
