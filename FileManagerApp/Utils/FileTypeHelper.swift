@@ -21,13 +21,14 @@ enum FileTypeHelper {
         // Images
         case "jpg", "jpeg", "png", "gif", "bmp", "tiff", "tif",
              "heic", "heif", "webp", "svg", "ico", "raw", "cr2",
-             "nef", "arw", "dng", "orf", "rw2", "psd", "ai":
+             "nef", "arw", "dng", "orf", "rw2", "psd", "ai",
+             "jfif", "jpe", "jp2", "j2k", "jxl", "avif":
             return .image
 
         // Videos
         case "mp4", "m4v", "mov", "avi", "mkv", "wmv", "flv",
-             "webm", "mpg", "mpeg", "3gp", "ogv", "ts", "mts",
-             "m2ts", "vob", "divx", "xvid", "rmvb", "asf":
+             "webm", "mpg", "mpeg", "3gp", "3g2", "ogv", "ts", "mts",
+             "m2ts", "vob", "divx", "xvid", "rmvb", "asf", "lrv", "insv":
             return .video
 
         // Audio
@@ -41,7 +42,8 @@ enum FileTypeHelper {
             return .pdf
 
         // Documents
-        case "doc", "docx", "odt", "rtf", "pages":
+        case "doc", "docx", "odt", "rtf", "pages", "wps", "xps",
+             "epub", "mobi", "azw3", "fb2", "ibooks", "cbr", "cbz":
             return .document
 
         // Spreadsheets
@@ -60,7 +62,7 @@ enum FileTypeHelper {
 
         // Code
         case "swift", "m", "h", "cpp", "c", "cs", "java", "kt",
-             "py", "rb", "js", "ts", "jsx", "tsx", "vue", "go",
+             "py", "rb", "js", "jsx", "tsx", "vue", "go",
              "rs", "php", "pl", "sh", "bash", "zsh", "fish",
              "ps1", "psm1", "bat", "cmd", "r", "lua", "dart",
              "scala", "groovy", "clj", "hs", "elm", "ex", "exs",

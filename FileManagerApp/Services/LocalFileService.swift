@@ -33,8 +33,10 @@ final class LocalFileService: FileProvider {
         let bookmarkData: Data
     }
 
-    private var smartFolderCache: [String: (timestamp: Date, items: [FileItem])] = [:]
+    private var smartFolderCache: [String: (schemaVersion: Int, timestamp: Date, items: [FileItem])] = [:]
     private let cacheTTL: TimeInterval = 30
+    /// Bump when scan / classification rules change so users are not stuck with stale smart-folder results for `cacheTTL`.
+    private static let smartFolderCacheSchemaVersion = 2
     private static let externalFoldersKey = "local_external_folders_v1"
 
     func connect() async throws {}
@@ -107,7 +109,9 @@ final class LocalFileService: FileProvider {
     }
 
     private func listSmartFolder(at path: String) async throws -> [FileItem] {
-        if let cached = smartFolderCache[path], Date().timeIntervalSince(cached.timestamp) < cacheTTL {
+        if let cached = smartFolderCache[path],
+           cached.schemaVersion == Self.smartFolderCacheSchemaVersion,
+           Date().timeIntervalSince(cached.timestamp) < cacheTTL {
             return cached.items
         }
 
@@ -128,7 +132,7 @@ final class LocalFileService: FileProvider {
         let deduped = Self.deduplicated(scanned)
             .sorted { $0.modifiedDate > $1.modifiedDate }
 
-        smartFolderCache[path] = (Date(), deduped)
+        smartFolderCache[path] = (Self.smartFolderCacheSchemaVersion, Date(), deduped)
         return deduped
     }
 
@@ -295,7 +299,8 @@ final class LocalFileService: FileProvider {
         return try await Task.detached(priority: .userInitiated) {
             let opts = PHFetchOptions()
             opts.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
-            opts.includeHiddenAssets = false
+            // Include saved/hidden library items (e.g. some imports, “hidden” albums) so lists match Photos more closely.
+            opts.includeHiddenAssets = true
             opts.predicate = NSPredicate(
                 format: "mediaType == %d",
                 kind == .images ? PHAssetMediaType.image.rawValue : PHAssetMediaType.video.rawValue
@@ -640,10 +645,11 @@ final class LocalFileService: FileProvider {
 
         for rootPath in roots {
             let rootURL = URL(fileURLWithPath: rootPath, isDirectory: true)
+            // Do not use `.skipsHiddenFiles`: many apps keep media under dot-prefixed folders; skipping them drops WhatsApp-style paths inside this sandbox or added locations.
             guard let enumerator = fm.enumerator(
                 at: rootURL,
                 includingPropertiesForKeys: keys,
-                options: [.skipsPackageDescendants, .skipsHiddenFiles]
+                options: [.skipsPackageDescendants]
             ) else {
                 continue
             }
@@ -704,11 +710,13 @@ final class LocalFileService: FileProvider {
         case .videos:
             return type == .video
         case .documents:
+            // “All Documents” = non-media files: office/text/archives/etc. plus anything we classify as `.unknown`
+            // (odd extensions, exports) so the folder is useful instead of empty for many real trees.
             switch type {
-            case .document, .spreadsheet, .presentation, .pdf, .text, .code, .archive, .database:
-                return true
-            default:
+            case .image, .video, .audio, .folder:
                 return false
+            default:
+                return true
             }
         }
     }
