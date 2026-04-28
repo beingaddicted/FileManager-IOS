@@ -162,12 +162,15 @@ struct UniversalPreviewView: View {
     }
 
     private func decodeTextFile(at url: URL) throws -> String {
-        let data = try Data(contentsOf: url)
+        let data = try Data(contentsOf: url, options: [.mappedIfSafe])
+        if data.isLikelyBinary {
+            throw FileProviderError.transferFailed("This file looks binary and cannot be opened as text.")
+        }
 
         // Pattern inspired by mature text editors: try BOM-aware and common legacy encodings.
         let candidates: [String.Encoding] = [
             .utf8, .utf16, .utf16LittleEndian, .utf16BigEndian,
-            .utf32, .unicode, .windowsCP1252, .isoLatin1
+            .utf32, .unicode, .windowsCP1252, .isoLatin1, .ascii
         ]
 
         for encoding in candidates {
@@ -176,15 +179,28 @@ struct UniversalPreviewView: View {
             }
         }
 
-        if let fallback = String(data: data, encoding: .ascii) {
-            return fallback
+        var nsEncoding: UInt = 0
+        var converted: NSString?
+        let detected = NSString.stringEncoding(
+            for: data,
+            encodingOptions: nil,
+            convertedString: &converted,
+            usedLossyConversion: nil
+        )
+        if detected != 0 {
+            nsEncoding = detected
         }
+        if nsEncoding != 0,
+           let text = String(data: data, encoding: String.Encoding(rawValue: nsEncoding)) {
+            return text
+        }
+
         throw FileProviderError.transferFailed("Unsupported text encoding.")
     }
 
     private func resolvePreferredType(using localURL: URL) async -> FileItemType {
-        if let mediaKind = await detectMediaKind(from: localURL) {
-            return mediaKind
+        if [.image, .video, .audio, .pdf, .text, .code].contains(item.itemType) {
+            return item.itemType
         }
 
         if let mime = item.mimeType?.lowercased() {
@@ -214,8 +230,9 @@ struct UniversalPreviewView: View {
             if type.conforms(to: .sourceCode) { return .code }
         }
 
-        if [.image, .video, .audio, .pdf, .text, .code].contains(item.itemType) {
-            return item.itemType
+        // Expensive AV probing only as a final fallback for unknown/ambiguous media.
+        if let mediaKind = await detectMediaKind(from: localURL) {
+            return mediaKind
         }
 
         return .unknown
@@ -230,6 +247,20 @@ struct UniversalPreviewView: View {
             return .audio
         }
         return nil
+    }
+}
+
+private extension Data {
+    var isLikelyBinary: Bool {
+        if isEmpty { return false }
+        let sampleSize = Swift.min(count, 4096)
+        let sample = self.prefix(sampleSize)
+        if sample.contains(0) { return true }
+
+        let controlBytes = sample.filter { byte in
+            (byte < 0x09) || (byte > 0x0D && byte < 0x20)
+        }.count
+        return Double(controlBytes) / Double(sampleSize) > 0.12
     }
 }
 

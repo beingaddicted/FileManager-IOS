@@ -97,14 +97,16 @@ struct FileBrowserView: View {
         .alert("Delete \(itemToDelete?.name ?? "selected items")?",
                isPresented: $showDeleteConfirm) {
             Button("Delete", role: .destructive) {
+                // Capture before clearing: the Task runs later, so `itemToDelete` would already be nil.
+                let single = itemToDelete
+                itemToDelete = nil
                 Task {
-                    if let item = itemToDelete {
+                    if let item = single {
                         await vm.delete(item)
                     } else {
                         await vm.deleteSelected()
                     }
                 }
-                itemToDelete = nil
             }
             Button("Cancel", role: .cancel) { itemToDelete = nil }
         }
@@ -508,7 +510,7 @@ struct FileBrowserView: View {
             Button {
                 vm.isSelecting = true
             } label: {
-                Image(systemName: "checkmark.circle")
+                Text("Select")
             }
 
             // View mode toggle

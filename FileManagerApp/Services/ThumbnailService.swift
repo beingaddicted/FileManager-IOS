@@ -1,6 +1,7 @@
 import UIKit
 import AVFoundation
 import PDFKit
+import Photos
 import QuickLookThumbnailing
 
 // MARK: - Thumbnail Service
@@ -11,7 +12,6 @@ final class ThumbnailService {
     private init() {}
 
     private let cache = NSCache<NSString, UIImage>()
-    private var inFlight = Set<String>()
 
     // Max cache size: 100 MB
     private let maxCacheBytes = 100 * 1024 * 1024
@@ -25,31 +25,32 @@ final class ThumbnailService {
     func thumbnail(for item: FileItem, size: CGSize = CGSize(width: 80, height: 80)) async -> UIImage? {
         let key = cacheKey(item: item, size: size)
         if let cached = cache.object(forKey: key as NSString) { return cached }
-        guard !inFlight.contains(key) else { return nil }
-
-        inFlight.insert(key)
-        defer { inFlight.remove(key) }
-
-        let sourceURL: URL = item.providerType == .local
-            ? LocalFileService.accessibleURL(for: item.path)
-            : URL(fileURLWithPath: item.path)
-        let didStart = sourceURL.startAccessingSecurityScopedResource()
-        defer {
-            if didStart {
-                sourceURL.stopAccessingSecurityScopedResource()
-            }
-        }
 
         let image: UIImage?
-        switch item.itemType {
-        case .image:
-            image = await generateImageThumbnail(url: sourceURL, size: size)
-        case .video:
-            image = await generateVideoThumbnail(url: sourceURL, size: size)
-        case .pdf:
-            image = await generatePDFThumbnail(url: sourceURL, size: size)
-        default:
-            image = await generateQuickLookThumbnail(url: sourceURL, size: size)
+        if item.providerType == .local,
+           let localId = LocalFileService.photoAssetLocalIdentifier(for: item.path) {
+            image = await generatePhotoLibraryThumbnail(localIdentifier: localId, size: size)
+        } else {
+            let sourceURL: URL = item.providerType == .local
+                ? LocalFileService.accessibleURL(for: item.path)
+                : URL(fileURLWithPath: item.path)
+            let didStart = sourceURL.startAccessingSecurityScopedResource()
+            defer {
+                if didStart {
+                    sourceURL.stopAccessingSecurityScopedResource()
+                }
+            }
+
+            switch item.itemType {
+            case .image:
+                image = await generateImageThumbnail(url: sourceURL, size: size)
+            case .video:
+                image = await generateVideoThumbnail(url: sourceURL, size: size)
+            case .pdf:
+                image = await generatePDFThumbnail(url: sourceURL, size: size)
+            default:
+                image = await generateQuickLookThumbnail(url: sourceURL, size: size)
+            }
         }
 
         if let image {
@@ -61,6 +62,51 @@ final class ThumbnailService {
 
     func clearCache() {
         cache.removeAllObjects()
+    }
+
+    // MARK: - Photo library (virtual `/__photos__/…` paths)
+
+    private func generatePhotoLibraryThumbnail(localIdentifier: String, size: CGSize) async -> UIImage? {
+        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        let allowed: Bool
+        switch status {
+        case .authorized, .limited:
+            allowed = true
+        case .notDetermined:
+            allowed = await withCheckedContinuation { cont in
+                PHPhotoLibrary.requestAuthorization(for: .readWrite) { newStatus in
+                    cont.resume(returning: newStatus == .authorized || newStatus == .limited)
+                }
+            }
+        default:
+            allowed = false
+        }
+        guard allowed else { return nil }
+
+        let assets = PHAsset.fetchAssets(withLocalIdentifiers: [localIdentifier], options: nil)
+        guard let asset = assets.firstObject else { return nil }
+
+        let opts = PHImageRequestOptions()
+        opts.deliveryMode = .fastFormat
+        opts.isNetworkAccessAllowed = true
+        opts.resizeMode = .fast
+
+        let scale = UIScreen.main.scale
+        let target = CGSize(
+            width: max(size.width * scale, 1),
+            height: max(size.height * scale, 1)
+        )
+
+        return await withCheckedContinuation { cont in
+            PHImageManager.default().requestImage(
+                for: asset,
+                targetSize: target,
+                contentMode: .aspectFill,
+                options: opts
+            ) { image, _ in
+                cont.resume(returning: image)
+            }
+        }
     }
 
     // MARK: - Image thumbnail
@@ -89,12 +135,17 @@ final class ThumbnailService {
                 let gen     = AVAssetImageGenerator(asset: asset)
                 gen.appliesPreferredTrackTransform = true
                 gen.maximumSize = size
-                let time    = CMTime(seconds: 1, preferredTimescale: 60)
-                if let cgImg = try? gen.copyCGImage(at: time, actualTime: nil) {
-                    cont.resume(returning: UIImage(cgImage: cgImg))
-                } else {
-                    cont.resume(returning: nil)
+                let times = [
+                    CMTime(seconds: 1, preferredTimescale: 600),
+                    CMTime.zero
+                ]
+                for time in times {
+                    if let cgImg = try? gen.copyCGImage(at: time, actualTime: nil) {
+                        cont.resume(returning: UIImage(cgImage: cgImg))
+                        return
+                    }
                 }
+                cont.resume(returning: nil)
             }
         }
     }

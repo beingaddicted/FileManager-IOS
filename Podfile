@@ -20,6 +20,9 @@ target 'FileManagerApp' do
   # ── Image loading & caching ────────────────────────────────────────────────
   pod 'Kingfisher', '~> 7.10'        # Async image loading / disk cache
 
+  # ── Text syntax highlighting (open source) ────────────────────────────────
+  pod 'Highlightr', '~> 2.1'         # Highlight.js-powered syntax highlighting
+
 end
 
 post_install do |installer|

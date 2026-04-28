@@ -1,4 +1,7 @@
 import SwiftUI
+#if canImport(Highlightr)
+import Highlightr
+#endif
 
 // MARK: - Text Editor View
 
@@ -125,14 +128,53 @@ struct TextEditorView: View {
     // MARK: - Plain editor
 
     private var plainEditor: some View {
-        ScrollView {
-            TextEditor(text: isReadOnly ? .constant(text) : $text)
-                .font(.system(size: fontSize, design: .monospaced))
-                .lineLimit(wordWrap ? nil : 1)
-                .scrollDisabled(true)
-                .frame(maxWidth: .infinity, minHeight: UIScreen.main.bounds.height - 200)
-                .padding(12)
-                .onChange(of: text) { _ in isDirty = text != initialContent }
+        HighlightedTextViewRepresentable(
+            text: $text,
+            fontSize: fontSize,
+            isReadOnly: isReadOnly,
+            wordWrap: wordWrap,
+            languageHint: languageHint
+        )
+        .onChange(of: text) { _ in isDirty = text != initialContent }
+    }
+
+    private var languageHint: String {
+        let ext = item.fileExtension.lowercased()
+        switch ext {
+        case "json":
+            return "json"
+        case "yaml", "yml":
+            return "yaml"
+        case "xml":
+            return "xml"
+        case "html", "htm":
+            return "html"
+        case "js":
+            return "javascript"
+        case "ts":
+            return "typescript"
+        case "swift":
+            return "swift"
+        case "py":
+            return "python"
+        case "md", "markdown":
+            return "markdown"
+        case "java":
+            return "java"
+        case "kt":
+            return "kotlin"
+        case "c", "h":
+            return "c"
+        case "cpp", "cc", "hpp":
+            return "cpp"
+        case "css":
+            return "css"
+        case "sh", "zsh", "bash":
+            return "bash"
+        case "sql":
+            return "sql"
+        default:
+            return "plaintext"
         }
     }
 
@@ -205,6 +247,88 @@ struct LineNumberTextView: UIViewRepresentable {
 
         func textViewDidChange(_ tv: UITextView) {
             parent.text = tv.text
+        }
+    }
+}
+
+// MARK: - Highlighted Text View
+
+struct HighlightedTextViewRepresentable: UIViewRepresentable {
+    @Binding var text: String
+    var fontSize: CGFloat
+    var isReadOnly: Bool
+    var wordWrap: Bool
+    var languageHint: String
+
+    func makeUIView(context: Context) -> UITextView {
+        let textView = UITextView()
+        textView.delegate = context.coordinator
+        textView.font = UIFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+        textView.isEditable = !isReadOnly
+        textView.autocorrectionType = .no
+        textView.autocapitalizationType = .none
+        textView.smartDashesType = .no
+        textView.smartQuotesType = .no
+        textView.backgroundColor = .clear
+        textView.textContainerInset = UIEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
+        context.coordinator.apply(text: text, to: textView, languageHint: languageHint)
+        return textView
+    }
+
+    func updateUIView(_ textView: UITextView, context: Context) {
+        textView.font = UIFont.monospacedSystemFont(ofSize: fontSize, weight: .regular)
+        textView.isEditable = !isReadOnly
+        textView.textContainer.lineBreakMode = wordWrap ? .byWordWrapping : .byClipping
+
+        if context.coordinator.lastRenderedText != text || context.coordinator.lastLanguageHint != languageHint {
+            context.coordinator.apply(text: text, to: textView, languageHint: languageHint)
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(parent: self)
+    }
+
+    final class Coordinator: NSObject, UITextViewDelegate {
+        var parent: HighlightedTextViewRepresentable
+        var lastRenderedText: String = ""
+        var lastLanguageHint: String = ""
+
+#if canImport(Highlightr)
+        private let highlightr: Highlightr?
+#endif
+
+        init(parent: HighlightedTextViewRepresentable) {
+            self.parent = parent
+#if canImport(Highlightr)
+            let instance = Highlightr()
+            instance?.setTheme(to: "atom-one-dark")
+            self.highlightr = instance
+#endif
+        }
+
+        func apply(text: String, to textView: UITextView, languageHint: String) {
+            lastRenderedText = text
+            lastLanguageHint = languageHint
+
+#if canImport(Highlightr)
+            if let highlightr,
+               let highlighted = highlightr.highlight(text, as: languageHint) {
+                let mutable = NSMutableAttributedString(attributedString: highlighted)
+                mutable.addAttributes(
+                    [.font: UIFont.monospacedSystemFont(ofSize: parent.fontSize, weight: .regular)],
+                    range: NSRange(location: 0, length: mutable.length)
+                )
+                textView.attributedText = mutable
+                return
+            }
+#endif
+            textView.text = text
+        }
+
+        func textViewDidChange(_ textView: UITextView) {
+            parent.text = textView.text
+            lastRenderedText = textView.text
         }
     }
 }

@@ -189,8 +189,9 @@ final class LocalFileService: FileProvider {
     // MARK: - Operations
 
     func delete(at path: String) async throws {
-        if Self.decodePhotoAssetIdentifier(from: path) != nil {
-            throw FileProviderError.unsupportedOperation
+        if let localIdentifier = Self.decodePhotoAssetIdentifier(from: path) {
+            try await deletePhotoAsset(localIdentifier: localIdentifier)
+            return
         }
         try withSecurityScopedAccess(for: path) { resolvedPath in
             let resolvedURL = URL(fileURLWithPath: resolvedPath)
@@ -260,6 +261,11 @@ final class LocalFileService: FileProvider {
         guard path.hasPrefix("\(photosPrefix)/") else { return nil }
         let encoded = String(path.dropFirst(photosPrefix.count + 1))
         return encoded.removingPercentEncoding
+    }
+
+    /// Virtual photo path (`/__photos__/…`) → `PHAsset.localIdentifier`, for thumbnails and tools outside this type.
+    static func photoAssetLocalIdentifier(for path: String) -> String? {
+        decodePhotoAssetIdentifier(from: path)
     }
 
     private func ensurePhotoLibraryAccess() async throws {
@@ -381,6 +387,31 @@ final class LocalFileService: FileProvider {
         }
 
         return tmpURL
+    }
+
+    private func deletePhotoAsset(localIdentifier: String) async throws {
+        try await ensurePhotoLibraryAccess()
+
+        let fetch = PHAsset.fetchAssets(withLocalIdentifiers: [localIdentifier], options: nil)
+        guard fetch.count > 0 else {
+            throw FileProviderError.fileNotFound(localIdentifier)
+        }
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            PHPhotoLibrary.shared().performChanges({
+                PHAssetChangeRequest.deleteAssets(fetch)
+            }, completionHandler: { success, error in
+                if let error {
+                    continuation.resume(throwing: error)
+                    return
+                }
+                if success {
+                    continuation.resume(returning: ())
+                } else {
+                    continuation.resume(throwing: FileProviderError.transferFailed("Failed to delete media asset."))
+                }
+            })
+        }
     }
 
     static var rootPaths: [(name: String, path: String)] {
