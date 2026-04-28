@@ -75,28 +75,9 @@
 	<key>CFBundlePackageType</key>
 	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
 	<key>CFBundleShortVersionString</key>
-	<string>1.0</string>
-	<key>CFBundleURLTypes</key>
-	<array>
-		<dict>
-			<key>CFBundleTypeRole</key>
-			<string>Editor</string>
-			<key>CFBundleURLName</key>
-			<string>com.allfiles.oauth</string>
-			<key>CFBundleURLSchemes</key>
-			<array>
-				<string>allfiles</string>
-			</array>
-		</dict>
-	</array>
+	<string>2.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
-	<key>GoogleOAuthClientID</key>
-	<string></string>
-	<key>DropboxOAuthClientID</key>
-	<string></string>
-	<key>OneDriveOAuthClientID</key>
-	<string></string>
 	<key>LSSupportsOpeningDocumentsInPlace</key>
 	<true/>
 	<key>NSAppTransportSecurity</key>
@@ -109,26 +90,23 @@
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_http._tcp</string>
+		<string>_https._tcp</string>
 		<string>_ftp._tcp</string>
 		<string>_smb._tcp</string>
 		<string>_webdav._tcp</string>
 		<string>_webdavs._tcp</string>
 		<string>_afpovertcp._tcp</string>
-		<string>_daap._tcp</string>
 		<string>_ssh._tcp</string>
+		<string>_sftp-ssh._tcp</string>
 	</array>
-	<key>NSCameraUsageDescription</key>
-	<string>AllFiles needs camera access for scanning documents.</string>
 	<key>NSFaceIDUsageDescription</key>
-	<string>AllFiles uses Face ID to protect your saved passwords.</string>
+	<string>AllFiles uses Face ID to protect your saved server passwords.</string>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>AllFiles needs local network access to discover and connect to UPnP/DLNA, SMB, FTP, and WebDAV servers on your network.</string>
-	<key>NSMicrophoneUsageDescription</key>
-	<string>AllFiles needs microphone access for audio recording.</string>
+	<string>AllFiles needs local-network access to discover and connect to SMB, SFTP, WebDAV, FTP, and UPnP servers on your Wi-Fi.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
-	<string>AllFiles needs access to save media to your photo library.</string>
+	<string>AllFiles needs access to save downloaded media to your photo library.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>AllFiles needs access to your photo library to import images and videos.</string>
+	<string>AllFiles needs access to your photo library so it can browse, preview, and back up photos and videos to your server.</string>
 	<key>NSUbiquitousContainers</key>
 	<dict>
 		<key>iCloud.$(PRODUCT_BUNDLE_IDENTIFIER)</key>
@@ -144,9 +122,6 @@
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>
-		<string>fetch</string>
-		<string>external-accessory</string>
-		<string>processing</string>
 	</array>
 	<key>UIFileSharingEnabled</key>
 	<true/>

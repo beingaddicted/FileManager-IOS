@@ -46,6 +46,7 @@
 		A1B2C3D4E5F6000000000337 /* PhotoBackupSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6000000000037 /* PhotoBackupSettingsView.swift */; };
 		A1B2C3D4E5F6000000000338 /* BackgroundWebDAVSession.swift in Sources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6000000000038 /* BackgroundWebDAVSession.swift */; };
 		A1B2C3D4E5F6000000000401 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6000000000201 /* Assets.xcassets */; };
+		A1B2C3D4E5F6000000000402 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A1B2C3D4E5F6000000000202 /* PrivacyInfo.xcprivacy */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -89,6 +90,7 @@
 		A1B2C3D4E5F6000000000038 /* BackgroundWebDAVSession.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BackgroundWebDAVSession.swift; sourceTree = "<group>"; };
 		A1B2C3D4E5F6000000000100 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A1B2C3D4E5F6000000000201 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		A1B2C3D4E5F6000000000202 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		A1B2C3D4E5F6000000000500 /* FileManagerApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = FileManagerApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -250,6 +252,7 @@
 			children = (
 				A1B2C3D4E5F6000000000100 /* Info.plist */,
 				A1B2C3D4E5F6000000000201 /* Assets.xcassets */,
+				A1B2C3D4E5F6000000000202 /* PrivacyInfo.xcprivacy */,
 			);
 			path = Resources;
 			sourceTree = "<group>";
@@ -314,6 +317,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A1B2C3D4E5F6000000000401 /* Assets.xcassets in Resources */,
+				A1B2C3D4E5F6000000000402 /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
