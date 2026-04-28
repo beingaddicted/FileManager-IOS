@@ -1,8 +1,9 @@
 import SwiftUI
+import AVFoundation
 
 @main
 struct AllFilesApp: App {
-    @StateObject private var appState   = AppState()
+    @StateObject private var appState: AppState
     @StateObject private var connVM: ConnectionViewModel
 
     init() {
@@ -31,5 +32,3 @@ struct AllFilesApp: App {
         try? AVAudioSession.sharedInstance().setActive(true)
     }
 }
-
-import AVFoundation

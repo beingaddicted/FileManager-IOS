@@ -43,8 +43,9 @@ struct AddConnectionView: View {
                         }
                     }
                     .onChange(of: connectionType) { new in
-                        if portText.isEmpty || Int(portText) == ConnectionType.allCases.first(where: { _ in true })?.defaultPort {
-                            portText = "\(new.defaultPort)"
+                        if portText.isEmpty {
+                            let defaultPort = new == .upnp ? 80 : new.defaultPort
+                            portText = "\(defaultPort)"
                         }
                         usesSSL = new.usesSSL
                     }
@@ -98,7 +99,26 @@ struct AddConnectionView: View {
                                 Toggle("Use SSL / TLS", isOn: $usesSSL)
                             }
                         } else {
-                            Text("UPnP / DLNA devices will be auto-discovered on your local network.")
+                            HStack {
+                                Text("Description URL / Host")
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                TextField("Optional", text: $host)
+                                    .multilineTextAlignment(.trailing)
+                                    .autocorrectionDisabled()
+                                    .textInputAutocapitalization(.never)
+                                    .keyboardType(.URL)
+                            }
+                            HStack {
+                                Text("Port")
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                                TextField("80", text: $portText)
+                                    .multilineTextAlignment(.trailing)
+                                    .keyboardType(.numberPad)
+                                    .frame(width: 80)
+                            }
+                            Text("Leave blank to use discovery. Set URL/host for manual connect without multicast entitlement.")
                                 .font(.footnote)
                                 .foregroundStyle(.secondary)
                         }
@@ -200,7 +220,8 @@ struct AddConnectionView: View {
 
     private func populate() {
         guard let c = existing else {
-            portText = "\(connectionType.defaultPort)"
+            let defaultPort = connectionType == .upnp ? 80 : connectionType.defaultPort
+            portText = "\(defaultPort)"
             return
         }
         displayName    = c.displayName
@@ -223,7 +244,8 @@ struct AddConnectionView: View {
         if connectionType != .upnp && !connectionType.isCloud && host.isBlank {
             validationError = "Host is required."; return
         }
-        let port = Int(portText) ?? connectionType.defaultPort
+        let defaultPort = connectionType == .upnp ? 80 : connectionType.defaultPort
+        let port = Int(portText) ?? defaultPort
 
         var conn = existing ?? ServerConnection(
             displayName:  displayName,

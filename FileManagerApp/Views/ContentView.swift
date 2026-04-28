@@ -5,48 +5,61 @@ import SwiftUI
 struct ContentView: View {
     @EnvironmentObject var appState: AppState
     @EnvironmentObject var connVM: ConnectionViewModel
+    @State private var didAppear = false
 
     var body: some View {
-        TabView(selection: $appState.selectedTab) {
-            // MARK: Local
-            NavigationStack {
-                FileBrowserView(vm: connVM.makeLocalBrowser())
+        Group {
+            if didAppear {
+                TabView(selection: $appState.selectedTab) {
+                    // MARK: Local
+                    NavigationStack {
+                        FileBrowserView(vm: connVM.makeLocalBrowser())
+                    }
+                    .tabItem {
+                        Label("Local", systemImage: "internaldrive.fill")
+                    }
+                    .tag(AppTab.local)
+
+                    // MARK: Network
+                    ConnectionsListView()
+                        .tabItem {
+                            Label("Network", systemImage: "network")
+                        }
+                        .tag(AppTab.network)
+
+                    // MARK: Cloud
+                    CloudDashboardView()
+                        .tabItem {
+                            Label("Cloud", systemImage: "cloud.fill")
+                        }
+                        .tag(AppTab.cloud)
+
+                    // MARK: Recents
+                    RecentsView()
+                        .tabItem {
+                            Label("Recents", systemImage: "clock.fill")
+                        }
+                        .tag(AppTab.recents)
+
+                    // MARK: Settings
+                    SettingsView()
+                        .tabItem {
+                            Label("Settings", systemImage: "gearshape.fill")
+                        }
+                        .tag(AppTab.settings)
+                }
+            } else {
+                ProgressView("Starting…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-            .tabItem {
-                Label("Local", systemImage: "internaldrive.fill")
-            }
-            .tag(AppTab.local)
-
-            // MARK: Network
-            ConnectionsListView()
-                .tabItem {
-                    Label("Network", systemImage: "network")
-                }
-                .tag(AppTab.network)
-
-            // MARK: Cloud
-            CloudDashboardView()
-                .tabItem {
-                    Label("Cloud", systemImage: "cloud.fill")
-                }
-                .tag(AppTab.cloud)
-
-            // MARK: Recents
-            RecentsView()
-                .tabItem {
-                    Label("Recents", systemImage: "clock.fill")
-                }
-                .tag(AppTab.recents)
-
-            // MARK: Settings
-            SettingsView()
-                .tabItem {
-                    Label("Settings", systemImage: "gearshape.fill")
-                }
-                .tag(AppTab.settings)
         }
         .preferredColorScheme(appState.theme.colorScheme)
         .errorAlert(error: $appState.alertError)
+        .onAppear {
+            if !didAppear {
+                didAppear = true
+            }
+        }
     }
 }
 

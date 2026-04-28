@@ -147,13 +147,12 @@ struct UniversalPreviewView: View {
     }
 
     private func saveText(_ newText: String) async {
-        guard let url = localURL else { return }
         do {
-            try newText.write(to: url, atomically: true, encoding: .utf8)
-            // Re-upload to remote
-            let data = Data(newText.utf8)
-            _ = try? await URLSession.shared.data(from: url)    // no-op, just to keep compiler happy
-            _ = data
+            try await provider.saveText(newText, for: item)
+            if let refreshed = await provider.download(item) {
+                localURL = refreshed
+            }
+            textContent = newText
         } catch {
             loadError = error.localizedDescription
         }

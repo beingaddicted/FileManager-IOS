@@ -1,4 +1,5 @@
 import Foundation
+import Photos
 
 // MARK: - Local File Service
 
@@ -6,6 +7,7 @@ final class LocalFileService: FileProvider {
     let providerType: ProviderType = .local
     private(set) var isConnected: Bool = true
     static let smartRootPrefix = "/__smart__"
+    static let photosPrefix = "/__photos__"
 
     private struct SmartFolder {
         let name: String
@@ -25,8 +27,15 @@ final class LocalFileService: FileProvider {
         SmartFolder(name: "All Documents", path: "\(smartRootPrefix)/documents", kind: .documents)
     ]
 
+    private struct ExternalFolderBookmark: Codable {
+        let name: String
+        let path: String
+        let bookmarkData: Data
+    }
+
     private var smartFolderCache: [String: (timestamp: Date, items: [FileItem])] = [:]
     private let cacheTTL: TimeInterval = 30
+    private static let externalFoldersKey = "local_external_folders_v1"
 
     func connect() async throws {}
     func disconnect() {}
@@ -78,12 +87,14 @@ final class LocalFileService: FileProvider {
             .isHiddenKey, .isSymbolicLinkKey
         ]
         do {
-            let contents = try fm.contentsOfDirectory(
-                at: url,
-                includingPropertiesForKeys: keys,
-                options: [.skipsPackageDescendants]
-            )
-            return contents.compactMap { FileItem.fromLocalURL($0) }
+            return try withSecurityScopedAccess(for: path) {
+                let contents = try fm.contentsOfDirectory(
+                    at: url,
+                    includingPropertiesForKeys: keys,
+                    options: [.skipsPackageDescendants]
+                )
+                return contents.compactMap { FileItem.fromLocalURL($0) }
+            }
         } catch {
             let nsError = error as NSError
             if nsError.domain == NSCocoaErrorDomain &&
@@ -105,9 +116,15 @@ final class LocalFileService: FileProvider {
         }
 
         let roots = Self.rootPaths.map(\.path).filter { FileManager.default.fileExists(atPath: $0) }
-        let scanned = try await Task.detached(priority: .userInitiated) {
+        var scanned = try await Task.detached(priority: .userInitiated) {
             try Self.scanFiles(in: roots, kind: folder.kind)
         }.value
+
+        if folder.kind == .images || folder.kind == .videos {
+            let photoItems = try await scanPhotoLibrary(kind: folder.kind)
+            scanned.append(contentsOf: photoItems)
+            scanned.sort { $0.modifiedDate > $1.modifiedDate }
+        }
 
         smartFolderCache[path] = (Date(), scanned)
         return scanned
@@ -116,62 +133,245 @@ final class LocalFileService: FileProvider {
     // MARK: - Info
 
     func getInfo(at path: String) async throws -> FileItem {
-        let url = URL(fileURLWithPath: path)
-        guard let item = FileItem.fromLocalURL(url) else {
-            throw FileProviderError.fileNotFound(path)
+        if let localIdentifier = Self.decodePhotoAssetIdentifier(from: path),
+           let item = try await photoFileItem(localIdentifier: localIdentifier) {
+            return item
         }
-        return item
+
+        return try withSecurityScopedAccess(for: path) {
+            let url = URL(fileURLWithPath: path)
+            guard let item = FileItem.fromLocalURL(url) else {
+                throw FileProviderError.fileNotFound(path)
+            }
+            return item
+        }
     }
 
     // MARK: - Download / Upload
 
     func download(from path: String, progress: ProgressHandler?) async throws -> Data {
+        if let localIdentifier = Self.decodePhotoAssetIdentifier(from: path) {
+            let url = try await exportPhotoAssetToTemp(localIdentifier: localIdentifier)
+            let data = try Data(contentsOf: url)
+            progress?(1.0)
+            return data
+        }
+
+        return try withSecurityScopedAccess(for: path) {
+            let url = URL(fileURLWithPath: path)
+            let data = try Data(contentsOf: url)
+            progress?(1.0)
+            return data
+        }
+    }
+
+    func downloadToTemp(from path: String, progress: ProgressHandler?) async throws -> URL {
+        if let localIdentifier = Self.decodePhotoAssetIdentifier(from: path) {
+            let url = try await exportPhotoAssetToTemp(localIdentifier: localIdentifier)
+            progress?(1.0)
+            return url
+        }
         let url = URL(fileURLWithPath: path)
-        let data = try Data(contentsOf: url)
         progress?(1.0)
-        return data
+        return url
     }
 
     func upload(_ data: Data, to path: String, progress: ProgressHandler?) async throws {
-        let url = URL(fileURLWithPath: path)
-        try data.write(to: url, options: .atomic)
-        progress?(1.0)
+        try withSecurityScopedAccess(for: path) {
+            let url = URL(fileURLWithPath: path)
+            try data.write(to: url, options: .atomic)
+            progress?(1.0)
+        }
     }
 
     // MARK: - Operations
 
     func delete(at path: String) async throws {
-        try FileManager.default.removeItem(atPath: path)
+        if Self.decodePhotoAssetIdentifier(from: path) != nil {
+            throw FileProviderError.unsupportedOperation
+        }
+        try withSecurityScopedAccess(for: path) {
+            try FileManager.default.removeItem(atPath: path)
+        }
     }
 
     func createDirectory(at path: String) async throws {
-        try FileManager.default.createDirectory(
-            atPath: path,
-            withIntermediateDirectories: true
-        )
+        try withSecurityScopedAccess(for: path) {
+            try FileManager.default.createDirectory(
+                atPath: path,
+                withIntermediateDirectories: true
+            )
+        }
     }
 
     func rename(at path: String, to newName: String) async throws {
-        let src = URL(fileURLWithPath: path)
-        let dst = src.deletingLastPathComponent().appendingPathComponent(newName)
-        try FileManager.default.moveItem(at: src, to: dst)
+        if Self.decodePhotoAssetIdentifier(from: path) != nil {
+            throw FileProviderError.unsupportedOperation
+        }
+        try withSecurityScopedAccess(for: path) {
+            let src = URL(fileURLWithPath: path)
+            let dst = src.deletingLastPathComponent().appendingPathComponent(newName)
+            try FileManager.default.moveItem(at: src, to: dst)
+        }
     }
 
     func move(from src: String, to dst: String) async throws {
-        try FileManager.default.moveItem(
-            atPath: src,
-            toPath: dst
-        )
+        if Self.decodePhotoAssetIdentifier(from: src) != nil {
+            throw FileProviderError.unsupportedOperation
+        }
+        try withSecurityScopedAccess(for: src) {
+            try FileManager.default.moveItem(
+                atPath: src,
+                toPath: dst
+            )
+        }
     }
 
     func copy(from src: String, to dst: String) async throws {
-        try FileManager.default.copyItem(
-            atPath: src,
-            toPath: dst
-        )
+        if Self.decodePhotoAssetIdentifier(from: src) != nil {
+            throw FileProviderError.unsupportedOperation
+        }
+        try withSecurityScopedAccess(for: src) {
+            try FileManager.default.copyItem(
+                atPath: src,
+                toPath: dst
+            )
+        }
     }
 
     // MARK: - Helpers
+
+    private static func photoAssetPath(for localIdentifier: String) -> String {
+        let encoded = localIdentifier.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? localIdentifier
+        return "\(photosPrefix)/\(encoded)"
+    }
+
+    private static func decodePhotoAssetIdentifier(from path: String) -> String? {
+        guard path.hasPrefix("\(photosPrefix)/") else { return nil }
+        let encoded = String(path.dropFirst(photosPrefix.count + 1))
+        return encoded.removingPercentEncoding
+    }
+
+    private func ensurePhotoLibraryAccess() async throws {
+        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        switch status {
+        case .authorized, .limited:
+            return
+        case .notDetermined:
+            let newStatus = await withCheckedContinuation { continuation in
+                PHPhotoLibrary.requestAuthorization(for: .readWrite) { result in
+                    continuation.resume(returning: result)
+                }
+            }
+            guard newStatus == .authorized || newStatus == .limited else {
+                throw FileProviderError.permissionDenied
+            }
+        default:
+            throw FileProviderError.permissionDenied
+        }
+    }
+
+    private func scanPhotoLibrary(kind: SmartFolder.Kind) async throws -> [FileItem] {
+        guard kind == .images || kind == .videos else { return [] }
+        try await ensurePhotoLibraryAccess()
+
+        return try await Task.detached(priority: .userInitiated) {
+            let opts = PHFetchOptions()
+            opts.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+            opts.includeHiddenAssets = false
+            opts.predicate = NSPredicate(
+                format: "mediaType == %d",
+                kind == .images ? PHAssetMediaType.image.rawValue : PHAssetMediaType.video.rawValue
+            )
+
+            let fetch = PHAsset.fetchAssets(with: opts)
+            var results: [FileItem] = []
+            fetch.enumerateObjects { asset, _, _ in
+                let resources = PHAssetResource.assetResources(for: asset)
+                let preferredType: PHAssetResourceType = kind == .images ? .photo : .video
+                let preferred = resources.first(where: { $0.type == preferredType }) ?? resources.first
+                let filename = preferred?.originalFilename ?? (kind == .images ? "Photo.jpg" : "Video.mov")
+                let fileSize = (preferred?.value(forKey: "fileSize") as? NSNumber)?.int64Value ?? 0
+
+                results.append(FileItem(
+                    id: "photo-\(asset.localIdentifier)",
+                    name: filename,
+                    path: Self.photoAssetPath(for: asset.localIdentifier),
+                    size: fileSize,
+                    modifiedDate: asset.modificationDate ?? asset.creationDate ?? Date(),
+                    createdDate: asset.creationDate,
+                    isDirectory: false,
+                    isHidden: false,
+                    isSymlink: false,
+                    itemType: kind == .images ? .image : .video,
+                    providerType: .local
+                ))
+            }
+            return results
+        }.value
+    }
+
+    private func photoFileItem(localIdentifier: String) async throws -> FileItem? {
+        try await ensurePhotoLibraryAccess()
+        return try await Task.detached(priority: .userInitiated) {
+            let fetch = PHAsset.fetchAssets(withLocalIdentifiers: [localIdentifier], options: nil)
+            guard let asset = fetch.firstObject else { return nil }
+            let resources = PHAssetResource.assetResources(for: asset)
+            let kind: SmartFolder.Kind = asset.mediaType == .video ? .videos : .images
+            let preferredType: PHAssetResourceType = kind == .images ? .photo : .video
+            let preferred = resources.first(where: { $0.type == preferredType }) ?? resources.first
+            let filename = preferred?.originalFilename ?? (kind == .images ? "Photo.jpg" : "Video.mov")
+            let fileSize = (preferred?.value(forKey: "fileSize") as? NSNumber)?.int64Value ?? 0
+            return FileItem(
+                id: "photo-\(asset.localIdentifier)",
+                name: filename,
+                path: Self.photoAssetPath(for: asset.localIdentifier),
+                size: fileSize,
+                modifiedDate: asset.modificationDate ?? asset.creationDate ?? Date(),
+                createdDate: asset.creationDate,
+                isDirectory: false,
+                isHidden: false,
+                isSymlink: false,
+                itemType: kind == .images ? .image : .video,
+                providerType: .local
+            )
+        }.value
+    }
+
+    private func exportPhotoAssetToTemp(localIdentifier: String) async throws -> URL {
+        try await ensurePhotoLibraryAccess()
+
+        let (asset, resource) = try await Task.detached(priority: .userInitiated) {
+            let fetch = PHAsset.fetchAssets(withLocalIdentifiers: [localIdentifier], options: nil)
+            guard let asset = fetch.firstObject else { throw FileProviderError.fileNotFound(localIdentifier) }
+            let resources = PHAssetResource.assetResources(for: asset)
+            guard let resource = resources.first else { throw FileProviderError.fileNotFound(localIdentifier) }
+            return (asset, resource)
+        }.value
+
+        let fallbackName = asset.mediaType == .video ? "Video.mov" : "Photo.jpg"
+        let originalName = resource.originalFilename.isEmpty ? fallbackName : resource.originalFilename
+        let ext = URL(fileURLWithPath: originalName).pathExtension
+        let tmpURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension(ext)
+
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            PHAssetResourceManager.default().writeData(
+                for: resource,
+                toFile: tmpURL,
+                options: nil
+            ) { error in
+                if let error {
+                    continuation.resume(throwing: error)
+                } else {
+                    continuation.resume(returning: ())
+                }
+            }
+        }
+
+        return tmpURL
+    }
 
     static var rootPaths: [(name: String, path: String)] {
         let fm  = FileManager.default
@@ -213,7 +413,60 @@ final class LocalFileService: FileProvider {
             .appendingPathComponent("Documents") {
             paths.append(("iCloud Documents", icloud.path))
         }
+        paths.append(contentsOf: externalFolderRoots())
         return paths
+    }
+
+    static func externalFolderRoots() -> [(name: String, path: String)] {
+        externalFolderBookmarks().map { ($0.name, $0.path) }
+    }
+
+    private static func externalFolderBookmarks() -> [ExternalFolderBookmark] {
+        guard let data = UserDefaults.standard.data(forKey: externalFoldersKey),
+              let bookmarks = try? JSONDecoder().decode([ExternalFolderBookmark].self, from: data) else {
+            return []
+        }
+        return bookmarks
+    }
+
+    static func addExternalFolderBookmark(url: URL) throws {
+        let bookmark = try url.bookmarkData(options: .minimalBookmark, includingResourceValuesForKeys: nil, relativeTo: nil)
+        let name = url.lastPathComponent.isEmpty ? "External Folder" : url.lastPathComponent
+        let newEntry = ExternalFolderBookmark(name: name, path: url.path, bookmarkData: bookmark)
+        var entries = externalFolderBookmarks()
+        entries.removeAll { $0.path == newEntry.path }
+        entries.append(newEntry)
+        if let data = try? JSONEncoder().encode(entries) {
+            UserDefaults.standard.set(data, forKey: externalFoldersKey)
+        }
+    }
+
+    static func removeExternalFolder(path: String) {
+        var entries = externalFolderBookmarks()
+        entries.removeAll { $0.path == path }
+        if let data = try? JSONEncoder().encode(entries) {
+            UserDefaults.standard.set(data, forKey: externalFoldersKey)
+        }
+    }
+
+    private func withSecurityScopedAccess<T>(for path: String, _ work: () throws -> T) throws -> T {
+        guard let bookmark = Self.externalFolderBookmarks().first(where: { path.hasPrefix($0.path) }) else {
+            return try work()
+        }
+        var isStale = false
+        let resolved = try URL(
+            resolvingBookmarkData: bookmark.bookmarkData,
+            options: .withoutUI,
+            relativeTo: nil,
+            bookmarkDataIsStale: &isStale
+        )
+        let didStart = resolved.startAccessingSecurityScopedResource()
+        defer {
+            if didStart {
+                resolved.stopAccessingSecurityScopedResource()
+            }
+        }
+        return try work()
     }
 
     private static func scanFiles(in roots: [String], kind: SmartFolder.Kind) throws -> [FileItem] {

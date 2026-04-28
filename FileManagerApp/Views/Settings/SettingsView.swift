@@ -1,4 +1,5 @@
 import SwiftUI
+import UniformTypeIdentifiers
 
 // MARK: - Settings View
 
@@ -7,6 +8,14 @@ struct SettingsView: View {
     @State private var showClearRecentsConfirm = false
     @State private var showClearCacheConfirm   = false
     @State private var cacheSize: String       = "Calculating…"
+    @State private var showFolderPicker        = false
+    @State private var folderAccessError: String?
+    @State private var externalFoldersRevision = 0
+
+    private var externalFolders: [(name: String, path: String)] {
+        _ = externalFoldersRevision
+        return LocalFileService.externalFolderRoots()
+    }
 
     var body: some View {
         NavigationStack {
@@ -66,6 +75,48 @@ struct SettingsView: View {
                     }
                 } header: {
                     Text("Storage")
+                }
+
+                Section {
+                    Button {
+                        showFolderPicker = true
+                    } label: {
+                        Label("Add Folder From Files", systemImage: "folder.badge.plus")
+                    }
+
+                    if externalFolders.isEmpty {
+                        Text("No extra folders added yet.")
+                            .foregroundStyle(.secondary)
+                    } else {
+                        ForEach(externalFolders, id: \.path) { folder in
+                            HStack {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(folder.name)
+                                    Text(folder.path)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .lineLimit(1)
+                                }
+                                Spacer()
+                                Button(role: .destructive) {
+                                    LocalFileService.removeExternalFolder(path: folder.path)
+                                    externalFoldersRevision += 1
+                                } label: {
+                                    Image(systemName: "trash")
+                                }
+                            }
+                        }
+                    }
+
+                    if let folderAccessError {
+                        Label(folderAccessError, systemImage: "exclamationmark.triangle.fill")
+                            .font(.footnote)
+                            .foregroundStyle(.red)
+                    }
+                } header: {
+                    Text("Local Folder Access")
+                } footer: {
+                    Text("iOS sandbox limits direct device-wide access. Add folders from Files app to browse them in Local.")
                 }
 
                 // MARK: Recents
@@ -134,6 +185,31 @@ struct SettingsView: View {
             }
             .task {
                 cacheSize = await calculateCacheSize()
+            }
+            .fileImporter(
+                isPresented: $showFolderPicker,
+                allowedContentTypes: [.folder],
+                allowsMultipleSelection: false
+            ) { result in
+                switch result {
+                case .success(let urls):
+                    guard let url = urls.first else { return }
+                    let granted = url.startAccessingSecurityScopedResource()
+                    defer {
+                        if granted {
+                            url.stopAccessingSecurityScopedResource()
+                        }
+                    }
+                    do {
+                        try LocalFileService.addExternalFolderBookmark(url: url)
+                        folderAccessError = nil
+                        externalFoldersRevision += 1
+                    } catch {
+                        folderAccessError = "Could not save access to selected folder."
+                    }
+                case .failure(let error):
+                    folderAccessError = error.localizedDescription
+                }
             }
         }
     }

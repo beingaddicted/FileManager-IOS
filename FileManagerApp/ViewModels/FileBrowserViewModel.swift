@@ -244,6 +244,14 @@ final class FileBrowserViewModel: ObservableObject {
         }
     }
 
+    func saveText(_ text: String, for item: FileItem) async throws {
+        guard item.isTextEditable else { throw FileProviderError.unsupportedOperation }
+        let data = Data(text.utf8)
+        try await provider.upload(data, to: item.path, progress: nil)
+        appState.addRecent(item)
+        await loadDirectory()
+    }
+
     // MARK: - Selection
 
     func toggleSelection(_ item: FileItem) {

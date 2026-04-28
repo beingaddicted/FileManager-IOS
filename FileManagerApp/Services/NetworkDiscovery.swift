@@ -263,7 +263,10 @@ final class UPnPService: FileProvider {
             await MainActor.run {
                 device = NetworkDiscovery.shared.discoveredDevices.first
             }
+        } else {
+            device = try await resolveDeviceFromManualEndpoint()
         }
+
         contentDirectoryURL = device?.services
             .first(where: { $0.serviceType.contains("ContentDirectory") })?
             .controlURL ?? ""
@@ -334,6 +337,82 @@ final class UPnPService: FileProvider {
 
     func move(from src: String, to dst: String) async throws {
         throw FileProviderError.unsupportedOperation
+    }
+
+    // MARK: - Manual endpoint fallback (no multicast required)
+
+    private func resolveDeviceFromManualEndpoint() async throws -> UPnPDevice {
+        for location in manualDescriptionCandidates() {
+            if let device = await fetchDeviceDescription(at: location) {
+                return device
+            }
+        }
+        throw FileProviderError.notConnected
+    }
+
+    private func manualDescriptionCandidates() -> [String] {
+        let hostInput = connection.host.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !hostInput.isEmpty else { return [] }
+
+        // If user entered a full description URL, use it first.
+        if hostInput.hasPrefix("http://") || hostInput.hasPrefix("https://"),
+           let url = URL(string: hostInput),
+           let host = url.host {
+            let basePort = url.port ?? (url.scheme == "https" ? 443 : 80)
+            let base = "\(url.scheme ?? "http")://\(host):\(basePort)"
+            var candidates: [String] = [hostInput]
+            // BubbleUPnP Server commonly uses 58050.
+            if basePort != 58050 {
+                candidates.append(contentsOf: bubbleUPnPCandidates(host: host))
+            }
+            candidates.append(contentsOf: genericDescriptionCandidates(base: base))
+            return Array(Set(candidates))
+        }
+
+        let baseHost = hostInput.replacingOccurrences(of: "http://", with: "")
+            .replacingOccurrences(of: "https://", with: "")
+            .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        let scheme = connection.usesSSL ? "https" : "http"
+        let requestedPort = connection.port > 0 ? connection.port : 80
+        let requestedBase = "\(scheme)://\(baseHost):\(requestedPort)"
+
+        var candidates = genericDescriptionCandidates(base: requestedBase)
+        // BubbleUPnP-specific fallback endpoints.
+        if requestedPort != 58050 {
+            candidates.append(contentsOf: bubbleUPnPCandidates(host: baseHost))
+        }
+
+        return Array(Set(candidates))
+    }
+
+    private func genericDescriptionCandidates(base: String) -> [String] {
+        [
+            "\(base)/rootDesc.xml",
+            "\(base)/RootDevice.xml",
+            "\(base)/rootDevice.xml",
+            "\(base)/description.xml",
+            "\(base)/device.xml",
+            "\(base)/xml/device_description.xml",
+            "\(base)/"
+        ]
+    }
+
+    private func bubbleUPnPCandidates(host: String) -> [String] {
+        let base = "http://\(host):58050"
+        return [
+            "\(base)/rootDesc.xml",
+            "\(base)/RootDevice.xml",
+            "\(base)/rootDevice.xml",
+            "\(base)/description.xml",
+            "\(base)/"
+        ]
+    }
+
+    private func fetchDeviceDescription(at location: String) async -> UPnPDevice? {
+        guard let url = URL(string: location) else { return nil }
+        guard let (data, _) = try? await URLSession.shared.data(from: url) else { return nil }
+        let parser = UPnPDeviceParser(data: data, location: location)
+        return parser.parse()
     }
 
     // MARK: - DIDL-Lite parser

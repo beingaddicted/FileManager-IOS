@@ -232,9 +232,43 @@ private struct BrowserPresentation: Identifiable {
 struct UPnPDiscoveryView: View {
     @StateObject private var discovery = NetworkDiscovery.shared
     @EnvironmentObject var connVM: ConnectionViewModel
+    @State private var manualEndpoint: String = ""
+    @State private var manualPort: String = "80"
+    @State private var isManualConnecting = false
+    @State private var manualError: String?
+    @State private var presentedBrowser: BrowserPresentation?
 
     var body: some View {
         List {
+            Section {
+                TextField("Description URL or host", text: $manualEndpoint)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
+                    .keyboardType(.URL)
+                TextField("Port", text: $manualPort)
+                    .keyboardType(.numberPad)
+                Button {
+                    connectManually()
+                } label: {
+                    if isManualConnecting {
+                        ProgressView()
+                    } else {
+                        Label("Connect to UPnP Server", systemImage: "link")
+                    }
+                }
+                .disabled(isManualConnecting || manualEndpoint.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                if let manualError {
+                    Label(manualError, systemImage: "exclamationmark.triangle.fill")
+                        .foregroundStyle(.red)
+                        .font(.footnote)
+                }
+            } header: {
+                Text("Manual Connect (No Multicast Needed)")
+            } footer: {
+                Text("Use your server description URL (for example rootDesc.xml) or host/IP. This works even on free Apple accounts.")
+            }
+
             if discovery.isDiscovering {
                 Section {
                     HStack {
@@ -267,26 +301,34 @@ struct UPnPDiscoveryView: View {
 
             ForEach(discovery.discoveredDevices) { device in
                 Section {
-                    HStack(spacing: 14) {
-                        ZStack {
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .fill(Color.red.opacity(0.12))
-                                .frame(width: 40, height: 40)
-                            Image(systemName: "tv.fill")
-                                .foregroundStyle(.red)
-                        }
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(device.friendlyName)
-                                .font(.body)
-                            Text(device.modelName)
+                    Button {
+                        connectToDiscoveredDevice(device)
+                    } label: {
+                        HStack(spacing: 14) {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .fill(Color.red.opacity(0.12))
+                                    .frame(width: 40, height: 40)
+                                Image(systemName: "tv.fill")
+                                    .foregroundStyle(.red)
+                            }
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(device.friendlyName)
+                                    .font(.body)
+                                Text(device.modelName)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer()
+                            Text(device.manufacturer)
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
+                            Image(systemName: "chevron.right")
                                 .font(.caption)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(.tertiary)
                         }
-                        Spacer()
-                        Text(device.manufacturer)
-                            .font(.caption2)
-                            .foregroundStyle(.tertiary)
                     }
+                    .buttonStyle(.plain)
                 }
             }
         }
@@ -308,6 +350,57 @@ struct UPnPDiscoveryView: View {
         }
         .task {
             discovery.startDiscovery()
+        }
+        .sheet(item: $presentedBrowser) { destination in
+            NavigationStack {
+                FileBrowserView(vm: destination.viewModel)
+            }
+        }
+    }
+
+    private func connectManually() {
+        manualError = nil
+        isManualConnecting = true
+        let endpoint = manualEndpoint.trimmingCharacters(in: .whitespacesAndNewlines)
+        let port = Int(manualPort) ?? 80
+        let connection = ServerConnection(
+            displayName: "Manual UPnP",
+            type: .upnp,
+            host: endpoint,
+            port: port
+        )
+
+        Task {
+            defer { isManualConnecting = false }
+            guard let provider = await connVM.connect(to: connection) else {
+                manualError = connVM.error ?? "Unable to connect to this UPnP endpoint."
+                return
+            }
+            presentedBrowser = BrowserPresentation(
+                id: connection.id,
+                viewModel: connVM.makeBrowser(for: provider, providerType: .upnp)
+            )
+        }
+    }
+
+    private func connectToDiscoveredDevice(_ device: UPnPDevice) {
+        manualError = nil
+        let connection = ServerConnection(
+            displayName: device.friendlyName,
+            type: .upnp,
+            host: device.location,
+            port: 80
+        )
+
+        Task {
+            guard let provider = await connVM.connect(to: connection) else {
+                manualError = connVM.error ?? "Could not connect to discovered server."
+                return
+            }
+            presentedBrowser = BrowserPresentation(
+                id: connection.id,
+                viewModel: connVM.makeBrowser(for: provider, providerType: .upnp)
+            )
         }
     }
 }
