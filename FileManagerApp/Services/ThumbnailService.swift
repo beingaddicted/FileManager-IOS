@@ -30,16 +30,26 @@ final class ThumbnailService {
         inFlight.insert(key)
         defer { inFlight.remove(key) }
 
+        let sourceURL: URL = item.providerType == .local
+            ? LocalFileService.accessibleURL(for: item.path)
+            : URL(fileURLWithPath: item.path)
+        let didStart = sourceURL.startAccessingSecurityScopedResource()
+        defer {
+            if didStart {
+                sourceURL.stopAccessingSecurityScopedResource()
+            }
+        }
+
         let image: UIImage?
         switch item.itemType {
         case .image:
-            image = await generateImageThumbnail(path: item.path, size: size)
+            image = await generateImageThumbnail(url: sourceURL, size: size)
         case .video:
-            image = await generateVideoThumbnail(path: item.path, size: size)
+            image = await generateVideoThumbnail(url: sourceURL, size: size)
         case .pdf:
-            image = await generatePDFThumbnail(path: item.path, size: size)
+            image = await generatePDFThumbnail(url: sourceURL, size: size)
         default:
-            image = await generateQuickLookThumbnail(path: item.path, size: size)
+            image = await generateQuickLookThumbnail(url: sourceURL, size: size)
         }
 
         if let image {
@@ -55,10 +65,9 @@ final class ThumbnailService {
 
     // MARK: - Image thumbnail
 
-    private func generateImageThumbnail(path: String, size: CGSize) async -> UIImage? {
+    private func generateImageThumbnail(url: URL, size: CGSize) async -> UIImage? {
         await withCheckedContinuation { cont in
             Task.detached(priority: .utility) {
-                let url   = URL(fileURLWithPath: path)
                 let opts  = [kCGImageSourceShouldCacheImmediately: true,
                              kCGImageSourceCreateThumbnailFromImageAlways: true,
                              kCGImageSourceThumbnailMaxPixelSize: Int(max(size.width, size.height)) * 2] as CFDictionary
@@ -73,10 +82,10 @@ final class ThumbnailService {
 
     // MARK: - Video thumbnail
 
-    private func generateVideoThumbnail(path: String, size: CGSize) async -> UIImage? {
+    private func generateVideoThumbnail(url: URL, size: CGSize) async -> UIImage? {
         await withCheckedContinuation { cont in
             Task.detached(priority: .utility) {
-                let asset   = AVURLAsset(url: URL(fileURLWithPath: path))
+                let asset   = AVURLAsset(url: url)
                 let gen     = AVAssetImageGenerator(asset: asset)
                 gen.appliesPreferredTrackTransform = true
                 gen.maximumSize = size
@@ -92,10 +101,10 @@ final class ThumbnailService {
 
     // MARK: - PDF thumbnail
 
-    private func generatePDFThumbnail(path: String, size: CGSize) async -> UIImage? {
+    private func generatePDFThumbnail(url: URL, size: CGSize) async -> UIImage? {
         await withCheckedContinuation { cont in
             Task.detached(priority: .utility) {
-                guard let doc   = PDFDocument(url: URL(fileURLWithPath: path)),
+                guard let doc   = PDFDocument(url: url),
                       let page  = doc.page(at: 0) else {
                     cont.resume(returning: nil); return
                 }
@@ -124,9 +133,9 @@ final class ThumbnailService {
 
     // MARK: - QuickLook fallback
 
-    private func generateQuickLookThumbnail(path: String, size: CGSize) async -> UIImage? {
+    private func generateQuickLookThumbnail(url: URL, size: CGSize) async -> UIImage? {
         let req = QLThumbnailGenerator.Request(
-            fileAt:          URL(fileURLWithPath: path),
+            fileAt:          url,
             size:            size,
             scale:           UIScreen.main.scale,
             representationTypes: .thumbnail

@@ -504,6 +504,13 @@ struct FileBrowserView: View {
 
     private var normalToolbar: some View {
         HStack(spacing: 4) {
+            // Multi-select shortcut
+            Button {
+                vm.isSelecting = true
+            } label: {
+                Image(systemName: "checkmark.circle")
+            }
+
             // View mode toggle
             Button {
                 withAnimation {
@@ -560,11 +567,6 @@ struct FileBrowserView: View {
                     Label("Browse Files Providers", systemImage: "folder")
                 }
                 Divider()
-                Button {
-                    vm.isSelecting = true
-                } label: {
-                    Label("Select Items", systemImage: "checkmark.circle")
-                }
                 if !vm.clipboardItems.isEmpty {
                     Button {
                         Task { await vm.paste() }

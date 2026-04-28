@@ -80,14 +80,14 @@ final class LocalFileService: FileProvider {
         }
 
         let fm  = FileManager.default
-        let url = URL(fileURLWithPath: path, isDirectory: true)
         let keys: [URLResourceKey] = [
             .nameKey, .isDirectoryKey, .fileSizeKey,
             .contentModificationDateKey, .creationDateKey,
             .isHiddenKey, .isSymbolicLinkKey
         ]
         do {
-            return try withSecurityScopedAccess(for: path) {
+            return try withSecurityScopedAccess(for: path) { resolvedPath in
+                let url = URL(fileURLWithPath: resolvedPath, isDirectory: true)
                 let contents = try fm.contentsOfDirectory(
                     at: url,
                     includingPropertiesForKeys: keys,
@@ -140,8 +140,8 @@ final class LocalFileService: FileProvider {
             return item
         }
 
-        return try withSecurityScopedAccess(for: path) {
-            let url = URL(fileURLWithPath: path)
+        return try withSecurityScopedAccess(for: path) { resolvedPath in
+            let url = URL(fileURLWithPath: resolvedPath)
             guard let item = FileItem.fromLocalURL(url) else {
                 throw FileProviderError.fileNotFound(path)
             }
@@ -159,8 +159,8 @@ final class LocalFileService: FileProvider {
             return data
         }
 
-        return try withSecurityScopedAccess(for: path) {
-            let url = URL(fileURLWithPath: path)
+        return try withSecurityScopedAccess(for: path) { resolvedPath in
+            let url = URL(fileURLWithPath: resolvedPath)
             let data = try coordinatedReadData(at: url)
             progress?(1.0)
             return data
@@ -179,8 +179,8 @@ final class LocalFileService: FileProvider {
     }
 
     func upload(_ data: Data, to path: String, progress: ProgressHandler?) async throws {
-        try withSecurityScopedAccess(for: path) {
-            let url = URL(fileURLWithPath: path)
+        try withSecurityScopedAccess(for: path) { resolvedPath in
+            let url = URL(fileURLWithPath: resolvedPath)
             try coordinatedWriteData(data, to: url)
             progress?(1.0)
         }
@@ -192,15 +192,23 @@ final class LocalFileService: FileProvider {
         if Self.decodePhotoAssetIdentifier(from: path) != nil {
             throw FileProviderError.unsupportedOperation
         }
-        try withSecurityScopedAccess(for: path) {
-            try FileManager.default.removeItem(atPath: path)
+        try withSecurityScopedAccess(for: path) { resolvedPath in
+            let resolvedURL = URL(fileURLWithPath: resolvedPath)
+            do {
+                try coordinatedDelete(at: resolvedURL)
+            } catch {
+                // Some provider URLs fail when translated path mapping differs; retry original path.
+                guard resolvedPath != path else { throw error }
+                let originalURL = URL(fileURLWithPath: path)
+                try coordinatedDelete(at: originalURL)
+            }
         }
     }
 
     func createDirectory(at path: String) async throws {
-        try withSecurityScopedAccess(for: path) {
+        try withSecurityScopedAccess(for: path) { resolvedPath in
             try FileManager.default.createDirectory(
-                atPath: path,
+                atPath: resolvedPath,
                 withIntermediateDirectories: true
             )
         }
@@ -210,8 +218,8 @@ final class LocalFileService: FileProvider {
         if Self.decodePhotoAssetIdentifier(from: path) != nil {
             throw FileProviderError.unsupportedOperation
         }
-        try withSecurityScopedAccess(for: path) {
-            let src = URL(fileURLWithPath: path)
+        try withSecurityScopedAccess(for: path) { resolvedPath in
+            let src = URL(fileURLWithPath: resolvedPath)
             let dst = src.deletingLastPathComponent().appendingPathComponent(newName)
             try FileManager.default.moveItem(at: src, to: dst)
         }
@@ -221,9 +229,9 @@ final class LocalFileService: FileProvider {
         if Self.decodePhotoAssetIdentifier(from: src) != nil {
             throw FileProviderError.unsupportedOperation
         }
-        try withSecurityScopedAccess(for: src) {
+        try withSecurityScopedAccess(for: src) { resolvedSrc in
             try FileManager.default.moveItem(
-                atPath: src,
+                atPath: resolvedSrc,
                 toPath: dst
             )
         }
@@ -233,9 +241,9 @@ final class LocalFileService: FileProvider {
         if Self.decodePhotoAssetIdentifier(from: src) != nil {
             throw FileProviderError.unsupportedOperation
         }
-        try withSecurityScopedAccess(for: src) {
+        try withSecurityScopedAccess(for: src) { resolvedSrc in
             try FileManager.default.copyItem(
-                atPath: src,
+                atPath: resolvedSrc,
                 toPath: dst
             )
         }
@@ -451,14 +459,43 @@ final class LocalFileService: FileProvider {
         }
     }
 
-    private func withSecurityScopedAccess<T>(for path: String, _ work: () throws -> T) throws -> T {
-        guard let bookmark = Self.externalFolderBookmarks().first(where: { path.hasPrefix($0.path) }) else {
-            return try work()
+    static func accessibleURL(for path: String) -> URL {
+        let target = URL(fileURLWithPath: path).standardizedFileURL.path
+        guard let bookmark = externalFolderBookmarks().first(where: { bm in
+            let root = URL(fileURLWithPath: bm.path).standardizedFileURL.path
+            return pathIsWithin(target, root: root)
+        }) else {
+            return URL(fileURLWithPath: path)
+        }
+
+        var isStale = false
+        guard let resolved = try? URL(
+            resolvingBookmarkData: bookmark.bookmarkData,
+            options: [.withoutUI],
+            relativeTo: nil,
+            bookmarkDataIsStale: &isStale
+        ) else {
+            return URL(fileURLWithPath: path)
+        }
+
+        let resolvedRoot = resolved.standardizedFileURL.path
+        let bookmarkedRoot = URL(fileURLWithPath: bookmark.path).standardizedFileURL.path
+        if pathIsWithin(target, root: bookmarkedRoot) {
+            let suffix = String(target.dropFirst(bookmarkedRoot.count))
+            let translated = suffix.isEmpty ? resolvedRoot : resolvedRoot + suffix
+            return URL(fileURLWithPath: translated)
+        }
+        return URL(fileURLWithPath: path)
+    }
+
+    private func withSecurityScopedAccess<T>(for path: String, _ work: (String) throws -> T) throws -> T {
+        guard let bookmark = bookmarkForPath(path) else {
+            return try work(path)
         }
         var isStale = false
         let resolved = try URL(
             resolvingBookmarkData: bookmark.bookmarkData,
-            options: .withoutUI,
+            options: [.withoutUI],
             relativeTo: nil,
             bookmarkDataIsStale: &isStale
         )
@@ -468,7 +505,31 @@ final class LocalFileService: FileProvider {
                 resolved.stopAccessingSecurityScopedResource()
             }
         }
-        return try work()
+        let resolvedRoot = resolved.standardizedFileURL.path
+        let bookmarkedRoot = URL(fileURLWithPath: bookmark.path).standardizedFileURL.path
+        let target = URL(fileURLWithPath: path).standardizedFileURL.path
+        if Self.pathIsWithin(target, root: bookmarkedRoot) {
+            let suffix = String(target.dropFirst(bookmarkedRoot.count))
+            let translated = suffix.isEmpty ? resolvedRoot : resolvedRoot + suffix
+            return try work(translated)
+        }
+        return try work(path)
+    }
+
+    private func bookmarkForPath(_ path: String) -> ExternalFolderBookmark? {
+        let target = URL(fileURLWithPath: path).standardizedFileURL.path
+        return Self.externalFolderBookmarks().first { bookmark in
+            let root = URL(fileURLWithPath: bookmark.path).standardizedFileURL.path
+            return Self.pathIsWithin(target, root: root)
+        }
+    }
+
+    private static func pathIsWithin(_ target: String, root: String) -> Bool {
+        if target == root {
+            return true
+        }
+        let normalizedRoot = root.hasSuffix("/") ? root : root + "/"
+        return target.hasPrefix(normalizedRoot)
     }
 
     private func coordinatedReadData(at url: URL) throws -> Data {
@@ -512,6 +573,27 @@ final class LocalFileService: FileProvider {
         }
         if let writeError {
             throw writeError
+        }
+    }
+
+    private func coordinatedDelete(at url: URL) throws {
+        let coordinator = NSFileCoordinator(filePresenter: nil)
+        var coordinationError: NSError?
+        var deleteError: Error?
+
+        coordinator.coordinate(writingItemAt: url, options: [.forDeleting], error: &coordinationError) { coordinatedURL in
+            do {
+                try FileManager.default.removeItem(at: coordinatedURL)
+            } catch {
+                deleteError = error
+            }
+        }
+
+        if let coordinationError {
+            throw coordinationError
+        }
+        if let deleteError {
+            throw deleteError
         }
     }
 

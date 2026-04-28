@@ -1,6 +1,7 @@
 import SwiftUI
 import QuickLook
 import UniformTypeIdentifiers
+import AVFoundation
 
 // MARK: - Universal Preview Router
 
@@ -138,7 +139,7 @@ struct UniversalPreviewView: View {
                 throw FileProviderError.fileNotFound(item.path)
             }
             localURL = url
-            resolvedType = resolvePreferredType(using: url)
+            resolvedType = await resolvePreferredType(using: url)
             if (resolvedType == .text || resolvedType == .code || item.itemType == .text || item.itemType == .code) {
                 textContent = try decodeTextFile(at: url)
             }
@@ -181,9 +182,9 @@ struct UniversalPreviewView: View {
         throw FileProviderError.transferFailed("Unsupported text encoding.")
     }
 
-    private func resolvePreferredType(using localURL: URL) -> FileItemType {
-        if [.image, .video, .audio, .pdf, .text, .code].contains(item.itemType) {
-            return item.itemType
+    private func resolvePreferredType(using localURL: URL) async -> FileItemType {
+        if let mediaKind = await detectMediaKind(from: localURL) {
+            return mediaKind
         }
 
         if let mime = item.mimeType?.lowercased() {
@@ -213,7 +214,22 @@ struct UniversalPreviewView: View {
             if type.conforms(to: .sourceCode) { return .code }
         }
 
-        return item.itemType
+        if [.image, .video, .audio, .pdf, .text, .code].contains(item.itemType) {
+            return item.itemType
+        }
+
+        return .unknown
+    }
+
+    private func detectMediaKind(from localURL: URL) async -> FileItemType? {
+        let asset = AVURLAsset(url: localURL)
+        if let hasVideo = try? await asset.loadTracks(withMediaType: .video), !hasVideo.isEmpty {
+            return .video
+        }
+        if let hasAudio = try? await asset.loadTracks(withMediaType: .audio), !hasAudio.isEmpty {
+            return .audio
+        }
+        return nil
     }
 }
 

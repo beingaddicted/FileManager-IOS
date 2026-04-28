@@ -33,22 +33,8 @@ struct MediaPlayerView: View {
     // MARK: - Video
 
     private var videoView: some View {
-        ZStack {
-            Color.black.ignoresSafeArea()
-
-            VideoPlayerRepresented(player: playerVM.player)
-                .ignoresSafeArea()
-                .onTapGesture {
-                    withAnimation { showControls.toggle() }
-                    resetControlsTimer()
-                }
-
-            if showControls {
-                videoControls
-                    .transition(.opacity)
-                    .animation(.easeInOut(duration: 0.2), value: showControls)
-            }
-        }
+        VideoPlayer(player: playerVM.player)
+            .ignoresSafeArea()
         .toolbarBackground(.hidden, for: .navigationBar)
     }
 
