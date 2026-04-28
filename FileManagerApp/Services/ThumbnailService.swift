@@ -3,68 +3,129 @@ import AVFoundation
 import PDFKit
 import Photos
 import QuickLookThumbnailing
+import Kingfisher
 
 // MARK: - Thumbnail Service
+//
+// Two-tier cache:
+//   1. Kingfisher's in-memory cache (`MemoryStorage.Backend`) — instant hits.
+//   2. Kingfisher's disk cache — persists across launches, LRU-evicted by
+//      Kingfisher's own background sweeper.
+//
+// Cache keys include the file's mtime, so editing a file on the NAS produces
+// a fresh thumbnail without us having to track invalidations manually.
+//
+// Disk cap: 256 MB. Expiration: 30 days unused.
 
 @MainActor
 final class ThumbnailService {
     static let shared = ThumbnailService()
-    private init() {}
-
-    private let cache = NSCache<NSString, UIImage>()
-
-    // Max cache size: 100 MB
-    private let maxCacheBytes = 100 * 1024 * 1024
-
-    init(maxCacheMB: Int = 100) {
-        cache.totalCostLimit = maxCacheMB * 1024 * 1024
+    private init() {
+        let cache = ImageCache(name: "fileManagerThumbnails")
+        cache.memoryStorage.config.totalCostLimit = 64 * 1024 * 1024     // 64 MB RAM
+        cache.memoryStorage.config.expiration     = .seconds(60 * 30)   // 30 min
+        cache.diskStorage.config.sizeLimit        = 256 * 1024 * 1024   // 256 MB disk
+        cache.diskStorage.config.expiration       = .days(30)
+        // Sweep on every cold start; cheap because Kingfisher only touches
+        // expired entries.
+        cache.cleanExpiredDiskCache()
+        self.cache = cache
     }
+
+    private let cache: ImageCache
+    /// Coalesces concurrent requests for the same key so we never generate
+    /// the same thumbnail twice in parallel (common in long grids).
+    private var inFlight: [String: Task<UIImage?, Never>] = [:]
 
     // MARK: - Public
 
     func thumbnail(for item: FileItem, size: CGSize = CGSize(width: 80, height: 80)) async -> UIImage? {
         let key = cacheKey(item: item, size: size)
-        if let cached = cache.object(forKey: key as NSString) { return cached }
 
-        let image: UIImage?
-        if item.providerType == .local,
-           let localId = LocalFileService.photoAssetLocalIdentifier(for: item.path) {
-            image = await generatePhotoLibraryThumbnail(localIdentifier: localId, size: size)
-        } else {
-            let sourceURL: URL = item.providerType == .local
-                ? LocalFileService.accessibleURL(for: item.path)
-                : URL(fileURLWithPath: item.path)
-            let didStart = sourceURL.startAccessingSecurityScopedResource()
-            defer {
-                if didStart {
-                    sourceURL.stopAccessingSecurityScopedResource()
-                }
-            }
-
-            switch item.itemType {
-            case .image:
-                image = await generateImageThumbnail(url: sourceURL, size: size)
-            case .video:
-                image = await generateVideoThumbnail(url: sourceURL, size: size)
-            case .pdf:
-                image = await generatePDFThumbnail(url: sourceURL, size: size)
-            default:
-                image = await generateQuickLookThumbnail(url: sourceURL, size: size)
-            }
+        // L1: memory hit (Kingfisher checks both memory and disk asynchronously)
+        if let hit = cache.retrieveImageInMemoryCache(forKey: key) {
+            return hit
         }
 
-        if let image {
-            let cost = Int(image.size.width * image.size.height * 4)
-            cache.setObject(image, forKey: key as NSString, cost: cost)
+        // L2: disk hit. Kingfisher returns this asynchronously; we await it.
+        if let onDisk = await retrieveFromDisk(key: key) {
+            return onDisk
         }
-        return image
+
+        // Coalesce: another request for the same key already in flight?
+        if let existing = inFlight[key] {
+            return await existing.value
+        }
+
+        let task = Task<UIImage?, Never> { [weak self] in
+            guard let self else { return nil }
+            let generated = await self.generateThumbnail(item: item, size: size)
+            if let image = generated {
+                // Store to both layers; Kingfisher writes the disk file in
+                // the background so we don't await it.
+                self.cache.store(image, forKey: key, toDisk: true)
+            }
+            self.inFlight.removeValue(forKey: key)
+            return generated
+        }
+        inFlight[key] = task
+        return await task.value
     }
 
     func clearCache() {
-        cache.removeAllObjects()
+        cache.clearMemoryCache()
+        cache.clearDiskCache()
     }
 
-    // MARK: - Photo library (virtual `/__photos__/…` paths)
+    /// Total bytes used by the on-disk thumbnail cache. Useful for the
+    /// "Storage" row in Settings.
+    func diskCacheSize() async -> UInt {
+        await withCheckedContinuation { (cont: CheckedContinuation<UInt, Never>) in
+            cache.calculateDiskStorageSize { result in
+                switch result {
+                case .success(let size): cont.resume(returning: size)
+                case .failure:           cont.resume(returning: 0)
+                }
+            }
+        }
+    }
+
+    // MARK: - Private
+
+    private func retrieveFromDisk(key: String) async -> UIImage? {
+        await withCheckedContinuation { (cont: CheckedContinuation<UIImage?, Never>) in
+            cache.retrieveImage(forKey: key) { result in
+                switch result {
+                case .success(let value):
+                    cont.resume(returning: value.image)
+                case .failure:
+                    cont.resume(returning: nil)
+                }
+            }
+        }
+    }
+
+    private func generateThumbnail(item: FileItem, size: CGSize) async -> UIImage? {
+        if item.providerType == .local,
+           let localId = LocalFileService.photoAssetLocalIdentifier(for: item.path) {
+            return await generatePhotoLibraryThumbnail(localIdentifier: localId, size: size)
+        }
+        let sourceURL: URL = item.providerType == .local
+            ? LocalFileService.accessibleURL(for: item.path)
+            : URL(fileURLWithPath: item.path)
+        let didStart = sourceURL.startAccessingSecurityScopedResource()
+        defer {
+            if didStart { sourceURL.stopAccessingSecurityScopedResource() }
+        }
+        switch item.itemType {
+        case .image: return await generateImageThumbnail(url: sourceURL, size: size)
+        case .video: return await generateVideoThumbnail(url: sourceURL, size: size)
+        case .pdf:   return await generatePDFThumbnail(url: sourceURL, size: size)
+        default:     return await generateQuickLookThumbnail(url: sourceURL, size: size)
+        }
+    }
+
+    // MARK: - Photo library
 
     private func generatePhotoLibraryThumbnail(localIdentifier: String, size: CGSize) async -> UIImage? {
         let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
@@ -96,7 +157,6 @@ final class ThumbnailService {
             width: max(size.width * scale, 1),
             height: max(size.height * scale, 1)
         )
-
         return await withCheckedContinuation { cont in
             PHImageManager.default().requestImage(
                 for: asset,
@@ -109,14 +169,16 @@ final class ThumbnailService {
         }
     }
 
-    // MARK: - Image thumbnail
+    // MARK: - Image / video / PDF
 
     private func generateImageThumbnail(url: URL, size: CGSize) async -> UIImage? {
         await withCheckedContinuation { cont in
             Task.detached(priority: .utility) {
-                let opts  = [kCGImageSourceShouldCacheImmediately: true,
-                             kCGImageSourceCreateThumbnailFromImageAlways: true,
-                             kCGImageSourceThumbnailMaxPixelSize: Int(max(size.width, size.height)) * 2] as CFDictionary
+                let opts  = [
+                    kCGImageSourceShouldCacheImmediately: true,
+                    kCGImageSourceCreateThumbnailFromImageAlways: true,
+                    kCGImageSourceThumbnailMaxPixelSize: Int(max(size.width, size.height)) * 2
+                ] as CFDictionary
                 guard let src = CGImageSourceCreateWithURL(url as CFURL, nil),
                       let cgImg = CGImageSourceCreateThumbnailAtIndex(src, 0, opts) else {
                     cont.resume(returning: nil); return
@@ -125,8 +187,6 @@ final class ThumbnailService {
             }
         }
     }
-
-    // MARK: - Video thumbnail
 
     private func generateVideoThumbnail(url: URL, size: CGSize) async -> UIImage? {
         await withCheckedContinuation { cont in
@@ -150,10 +210,9 @@ final class ThumbnailService {
         }
     }
 
-    // MARK: - PDF thumbnail
-
     private func generatePDFThumbnail(url: URL, size: CGSize) async -> UIImage? {
-        await withCheckedContinuation { cont in
+        let screenScale = UIScreen.main.scale
+        return await withCheckedContinuation { cont in
             Task.detached(priority: .utility) {
                 guard let doc   = PDFDocument(url: url),
                       let page  = doc.page(at: 0) else {
@@ -163,26 +222,23 @@ final class ThumbnailService {
                 let scale     = min(size.width / pageRect.width, size.height / pageRect.height)
                 let imgSize   = CGSize(width: pageRect.width * scale, height: pageRect.height * scale)
 
-                UIGraphicsBeginImageContextWithOptions(imgSize, true, UIScreen.main.scale)
-                UIColor.white.setFill()
-                UIRectFill(CGRect(origin: .zero, size: imgSize))
-
-                guard let ctx = UIGraphicsGetCurrentContext() else {
-                    UIGraphicsEndImageContext()
-                    cont.resume(returning: nil); return
+                let renderer = UIGraphicsImageRenderer(size: imgSize, format: {
+                    let f = UIGraphicsImageRendererFormat()
+                    f.scale = screenScale
+                    f.opaque = true
+                    return f
+                }())
+                let img = renderer.image { ctx in
+                    UIColor.white.setFill()
+                    ctx.cgContext.fill(CGRect(origin: .zero, size: imgSize))
+                    ctx.cgContext.translateBy(x: 0, y: imgSize.height)
+                    ctx.cgContext.scaleBy(x: scale, y: -scale)
+                    page.draw(with: .mediaBox, to: ctx.cgContext)
                 }
-                ctx.translateBy(x: 0, y: imgSize.height)
-                ctx.scaleBy(x: scale, y: -scale)
-                page.draw(with: .mediaBox, to: ctx)
-
-                let img = UIGraphicsGetImageFromCurrentImageContext()
-                UIGraphicsEndImageContext()
                 cont.resume(returning: img)
             }
         }
     }
-
-    // MARK: - QuickLook fallback
 
     private func generateQuickLookThumbnail(url: URL, size: CGSize) async -> UIImage? {
         let req = QLThumbnailGenerator.Request(
@@ -197,6 +253,10 @@ final class ThumbnailService {
     // MARK: - Cache key
 
     private func cacheKey(item: FileItem, size: CGSize) -> String {
-        "\(item.id)_\(Int(size.width))x\(Int(size.height))"
+        // mtime in the key invalidates the cache whenever the file changes —
+        // important for thumbnails of files that are edited on the NAS.
+        let mtime = Int(item.modifiedDate.timeIntervalSince1970)
+        let conn  = item.connectionId?.uuidString ?? "local"
+        return "\(item.providerType.rawValue)|\(conn)|\(item.path)|\(mtime)|\(Int(size.width))x\(Int(size.height))"
     }
 }

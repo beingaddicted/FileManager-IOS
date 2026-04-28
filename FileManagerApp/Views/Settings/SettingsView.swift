@@ -237,16 +237,9 @@ struct SettingsView: View {
     // MARK: - Cache size
 
     private func calculateCacheSize() async -> String {
-        let cacheURL = FileManager.default.cachesDirectory
-        let size = await Task.detached(priority: .utility) {
-            (try? FileManager.default.contentsOfDirectory(
-                at: cacheURL,
-                includingPropertiesForKeys: [.fileSizeKey]
-            ).compactMap {
-                (try? $0.resourceValues(forKeys: [.fileSizeKey]))?.fileSize
-            }.reduce(0, +)) ?? 0
-        }.value
-        return ByteCountFormatter.string(fromByteCount: Int64(size), countStyle: .file)
+        // Kingfisher owns the on-disk thumbnail cache; ask it directly.
+        let bytes = await ThumbnailService.shared.diskCacheSize()
+        return ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
     }
 }
 
